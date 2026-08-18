@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
-  Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock,
+  Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -590,6 +590,8 @@ function Devices() {
   const [loading, setLoading] = useState(true);
   const [editDraft, setEditDraft] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [notifyDraft, setNotifyDraft] = useState(null);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
@@ -608,6 +610,25 @@ function Devices() {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
     await supabase.from("devices").update({ is_locked: command === "LOCK" }).eq("id", device.id);
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+    load();
+  }
+
+  function openNotify(d) { setNotifyDraft({ device: d, message: "" }); setError(""); }
+
+  async function sendNotify() {
+    if (!notifyDraft.message.trim()) { setError("Enter a message."); return; }
+    setSending(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({
+      device_id: notifyDraft.device.id,
+      command: "NOTIFY",
+      message: notifyDraft.message.trim(),
+      issued_by: user?.email || "admin",
+    });
+    await supabase.functions.invoke("notify-devices", { body: { device_ids: [notifyDraft.device.id] } }).catch(() => {});
+    setSending(false);
+    setNotifyDraft(null);
     load();
   }
 
@@ -664,6 +685,7 @@ function Devices() {
                           <LockIcon size={13} /> Lock
                         </button>
                       )}
+                      <button style={S.iconBtn} onClick={() => openNotify(d)} aria-label="Send notification"><Bell size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
                       <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
                     </div>
@@ -674,6 +696,25 @@ function Devices() {
           </tbody>
         </table>
       </div>
+
+      {notifyDraft && (
+        <Drawer title={`Notify ${notifyDraft.device.customers?.name || notifyDraft.device.device_model}`} onClose={() => setNotifyDraft(null)}>
+          <Field label="Message" error={error}>
+            <textarea
+              style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
+              value={notifyDraft.message}
+              onChange={(e) => setNotifyDraft({ ...notifyDraft, message: e.target.value })}
+              placeholder="e.g. Your payment of Rs 10,000 is due tomorrow."
+            />
+          </Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={{ ...S.primaryBtn, opacity: sending ? 0.7 : 1 }} onClick={sendNotify} disabled={sending}>
+              {sending ? "Sending…" : "Send notification"}
+            </button>
+            <button style={S.secondaryBtn} onClick={() => setNotifyDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
 
       {editDraft && (
         <Drawer title="Edit device" onClose={() => setEditDraft(null)}>
