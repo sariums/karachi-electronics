@@ -47,6 +47,8 @@ function GlobalStyle() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
       * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+      html, body { margin: 0; padding: 0; background: #0F1115; color-scheme: dark; }
+      #root { min-height: 100vh; }
       .serif { font-family: 'Fraunces', serif; }
       .mono { font-family: 'JetBrains Mono', monospace; }
       input, select { outline: none; }
