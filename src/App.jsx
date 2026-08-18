@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
+  History, KeyRound,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -9,6 +10,13 @@ const money = (n) => `Rs ${Number(n || 0).toLocaleString()}`;
 
 function initials(name) {
   return (name || "").split(" ").filter(Boolean).slice(0, 2).map((n) => n[0].toUpperCase()).join("");
+}
+
+function formatEventTime(iso) {
+  const d = new Date(iso);
+  const datePart = d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  const timePart = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${datePart}, ${timePart}`;
 }
 
 export default function App() {
@@ -594,9 +602,18 @@ function Devices() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [notifyDraft, setNotifyDraft] = useState(null);
   const [sending, setSending] = useState(false);
+  const [historyDraft, setHistoryDraft] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("device_events_feed")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "device_events" }, () => load())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -611,9 +628,46 @@ function Devices() {
   async function sendCommand(device, command) {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
-    await supabase.from("devices").update({ is_locked: command === "LOCK" }).eq("id", device.id);
+
+    const updates = { is_locked: command === "LOCK" };
+    let generatedPin = null;
+    if (command === "LOCK") {
+      generatedPin = String(Math.floor(100000 + Math.random() * 900000));
+      updates.unlock_pin = generatedPin;
+      updates.unlock_pin_generated_at = new Date().toISOString();
+    } else {
+      updates.unlock_pin = null;
+      updates.unlock_pin_generated_at = null;
+    }
+    await supabase.from("devices").update(updates).eq("id", device.id);
+
+    await supabase.from("device_events").insert({
+      device_id: device.id,
+      event_type: command === "LOCK" ? "LOCK" : "UNLOCK",
+      method: "ADMIN",
+    });
+
     supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+
+    if (generatedPin) {
+      alert(`Unlock code for this device: ${generatedPin}\n\nGive this to the customer only if they call in without internet access.`);
+    }
+
     load();
+  }
+
+  function showCode(device) {
+    alert(`Unlock code: ${device.unlock_pin}`);
+  }
+
+  async function openHistory(device) {
+    setHistoryDraft({ device, events: [], loading: true });
+    const { data } = await supabase
+      .from("device_events")
+      .select("*")
+      .eq("device_id", device.id)
+      .order("occurred_at", { ascending: false });
+    setHistoryDraft({ device, events: data || [], loading: false });
   }
 
   function openNotify(d) { setNotifyDraft({ device: d, message: "" }); setError(""); }
@@ -688,6 +742,10 @@ function Devices() {
                         </button>
                       )}
                       <button style={S.iconBtn} onClick={() => openNotify(d)} aria-label="Send notification"><Bell size={15} /></button>
+                      {d.is_locked && d.unlock_pin && (
+                        <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
+                      )}
+                      <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
                       <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
                     </div>
@@ -715,6 +773,23 @@ function Devices() {
             </button>
             <button style={S.secondaryBtn} onClick={() => setNotifyDraft(null)}>Cancel</button>
           </div>
+        </Drawer>
+      )}
+
+      {historyDraft && (
+        <Drawer title={`Activity · ${historyDraft.device.customers?.name || historyDraft.device.device_model}`} onClose={() => setHistoryDraft(null)}>
+          {historyDraft.loading && <p style={{ color: "#5C6478", fontSize: 13 }}>Loading…</p>}
+          {!historyDraft.loading && historyDraft.events.length === 0 && (
+            <p style={{ color: "#5C6478", fontSize: 13 }}>No activity yet.</p>
+          )}
+          {!historyDraft.loading && historyDraft.events.map((ev) => (
+            <div key={ev.id} style={{ padding: "10px 0", borderBottom: "1px solid #1B1E27" }}>
+              <p style={{ fontSize: 13.5, color: "#EDEEF2", margin: 0 }}>
+                {ev.event_type === "LOCK" ? "Locked" : "Unlocked"} via {ev.method === "PIN_CODE" ? "code" : "admin"}
+              </p>
+              <p className="mono" style={{ fontSize: 12, color: "#8891A3", margin: "2px 0 0" }}>{formatEventTime(ev.occurred_at)}</p>
+            </div>
+          ))}
         </Drawer>
       )}
 
