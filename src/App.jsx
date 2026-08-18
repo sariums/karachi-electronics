@@ -331,7 +331,11 @@ function CustomerDetail({ customer, onBack }) {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deviceDrawer, setDeviceDrawer] = useState(false);
+  const [deviceEditDraft, setDeviceEditDraft] = useState(null);
+  const [confirmDeleteDevice, setConfirmDeleteDevice] = useState(null);
   const [planDrawerFor, setPlanDrawerFor] = useState(null);
+  const [planEditDraft, setPlanEditDraft] = useState(null);
+  const [confirmDeletePlan, setConfirmDeletePlan] = useState(null);
   const [deviceDraft, setDeviceDraft] = useState({ device_model: "", imei: "" });
   const [planDraft, setPlanDraft] = useState({ total_amount: "", monthly_amount: "", number_of_months: "", start_date: "", due_day: 30 });
   const [error, setError] = useState("");
@@ -398,6 +402,60 @@ function CustomerDetail({ customer, onBack }) {
     load();
   }
 
+  function openEditDevice(d) { setDeviceEditDraft({ id: d.id, device_model: d.device_model, imei: d.imei || "" }); setError(""); }
+
+  async function saveEditDevice() {
+    if (!deviceEditDraft.device_model.trim()) { setError("Enter a device model."); return; }
+    await supabase.from("devices").update({
+      device_model: deviceEditDraft.device_model.trim(),
+      imei: deviceEditDraft.imei.trim() || null,
+    }).eq("id", deviceEditDraft.id);
+    setDeviceEditDraft(null);
+    load();
+  }
+
+  async function performDeleteDevice(id) {
+    await supabase.from("devices").delete().eq("id", id);
+    setConfirmDeleteDevice(null);
+    load();
+  }
+
+  function openEditPlan(p) {
+    setPlanEditDraft({
+      id: p.id,
+      total_amount: p.total_amount,
+      monthly_amount: p.monthly_amount,
+      number_of_months: p.number_of_months,
+      start_date: p.start_date,
+      due_day: p.due_day,
+      status: p.status,
+    });
+    setError("");
+  }
+
+  async function saveEditPlan() {
+    const total = Number(planEditDraft.total_amount);
+    const monthly = Number(planEditDraft.monthly_amount);
+    const months = Number(planEditDraft.number_of_months);
+    if (!total || !monthly || !months || !planEditDraft.start_date) { setError("Fill in all plan fields."); return; }
+    await supabase.from("installment_plans").update({
+      total_amount: total,
+      monthly_amount: monthly,
+      number_of_months: months,
+      start_date: planEditDraft.start_date,
+      due_day: Number(planEditDraft.due_day) || 30,
+      status: planEditDraft.status,
+    }).eq("id", planEditDraft.id);
+    setPlanEditDraft(null);
+    load();
+  }
+
+  async function performDeletePlan(id) {
+    await supabase.from("installment_plans").delete().eq("id", id);
+    setConfirmDeletePlan(null);
+    load();
+  }
+
   return (
     <div>
       <button style={{ ...S.secondaryBtn, marginBottom: 20 }} onClick={onBack}>&larr; Back to customers</button>
@@ -416,15 +474,25 @@ function CustomerDetail({ customer, onBack }) {
               <p style={{ fontSize: 14.5, color: "#EDEEF2", fontWeight: 500, margin: 0 }}>{d.device_model}</p>
               <p className="mono" style={{ fontSize: 12, color: "#8891A3", margin: "2px 0 0" }}>{d.imei || "no IMEI set"}</p>
             </div>
-            <span style={{ ...S.badge, background: d.is_locked ? "#3A1416" : "#0F2F2C", color: d.is_locked ? "#E5636A" : "#4FCFC0" }}>
-              {d.is_locked ? "Locked" : "Active"}
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ ...S.badge, background: d.is_locked ? "#3A1416" : "#0F2F2C", color: d.is_locked ? "#E5636A" : "#4FCFC0" }}>
+                {d.is_locked ? "Locked" : "Active"}
+              </span>
+              <button style={S.iconBtn} onClick={() => openEditDevice(d)} aria-label="Edit device"><Pencil size={15} /></button>
+              <button style={S.iconBtn} onClick={() => setConfirmDeleteDevice(d)} aria-label="Delete device"><Trash2 size={15} color="#E5636A" /></button>
+            </div>
           </div>
           {d.installment_plans?.length > 0 ? (
             d.installment_plans.map((p) => (
-              <p key={p.id} style={{ fontSize: 12.5, color: "#8891A3", margin: "4px 0" }}>
-                Plan: {money(p.total_amount)} total, {money(p.monthly_amount)}/mo for {p.number_of_months} months, due day {p.due_day} — <span style={{ color: "#C7CCD9" }}>{p.status}</span>
-              </p>
+              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, margin: "4px 0" }}>
+                <p style={{ fontSize: 12.5, color: "#8891A3", margin: 0 }}>
+                  Plan: {money(p.total_amount)} total, {money(p.monthly_amount)}/mo for {p.number_of_months} months, due day {p.due_day} — <span style={{ color: "#C7CCD9" }}>{p.status}</span>
+                </p>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button style={S.iconBtn} onClick={() => openEditPlan(p)} aria-label="Edit plan"><Pencil size={13} /></button>
+                  <button style={S.iconBtn} onClick={() => setConfirmDeletePlan(p)} aria-label="Delete plan"><Trash2 size={13} color="#E5636A" /></button>
+                </div>
+              </div>
             ))
           ) : (
             <button style={{ ...S.secondaryBtn, marginTop: 6, fontSize: 12.5, padding: "6px 12px" }} onClick={() => setPlanDrawerFor(d.id)}>
@@ -460,6 +528,55 @@ function CustomerDetail({ customer, onBack }) {
           </div>
         </Drawer>
       )}
+
+      {deviceEditDraft && (
+        <Drawer title="Edit device" onClose={() => setDeviceEditDraft(null)}>
+          <Field label="Device model" error={error}><input style={S.input} value={deviceEditDraft.device_model} onChange={(e) => setDeviceEditDraft({ ...deviceEditDraft, device_model: e.target.value })} /></Field>
+          <Field label="IMEI (optional)"><input style={S.input} value={deviceEditDraft.imei} onChange={(e) => setDeviceEditDraft({ ...deviceEditDraft, imei: e.target.value })} /></Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={S.primaryBtn} onClick={saveEditDevice}>Save changes</button>
+            <button style={S.secondaryBtn} onClick={() => setDeviceEditDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {confirmDeleteDevice && (
+        <ConfirmDialog
+          title="Remove device"
+          message={`${confirmDeleteDevice.device_model} and its installment plans/payment history will be removed. This can't be undone.`}
+          onConfirm={() => performDeleteDevice(confirmDeleteDevice.id)}
+          onCancel={() => setConfirmDeleteDevice(null)}
+        />
+      )}
+
+      {planEditDraft && (
+        <Drawer title="Edit installment plan" onClose={() => setPlanEditDraft(null)}>
+          <Field label="Total amount"><input style={S.input} type="number" value={planEditDraft.total_amount} onChange={(e) => setPlanEditDraft({ ...planEditDraft, total_amount: e.target.value })} /></Field>
+          <Field label="Monthly amount"><input style={S.input} type="number" value={planEditDraft.monthly_amount} onChange={(e) => setPlanEditDraft({ ...planEditDraft, monthly_amount: e.target.value })} /></Field>
+          <Field label="Number of months"><input style={S.input} type="number" value={planEditDraft.number_of_months} onChange={(e) => setPlanEditDraft({ ...planEditDraft, number_of_months: e.target.value })} /></Field>
+          <Field label="Start date"><input style={S.input} type="date" value={planEditDraft.start_date} onChange={(e) => setPlanEditDraft({ ...planEditDraft, start_date: e.target.value })} /></Field>
+          <Field label="Due day of month"><input style={S.input} type="number" min="1" max="31" value={planEditDraft.due_day} onChange={(e) => setPlanEditDraft({ ...planEditDraft, due_day: e.target.value })} /></Field>
+          <Field label="Status">
+            <select style={{ ...S.select, width: "100%" }} value={planEditDraft.status} onChange={(e) => setPlanEditDraft({ ...planEditDraft, status: e.target.value })}>
+              {["Active", "Completed", "Defaulted"].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          {error && <p style={{ fontSize: 12, color: "#E5636A" }}>{error}</p>}
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={S.primaryBtn} onClick={saveEditPlan}>Save changes</button>
+            <button style={S.secondaryBtn} onClick={() => setPlanEditDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {confirmDeletePlan && (
+        <ConfirmDialog
+          title="Remove installment plan"
+          message="This plan and its scheduled payments will be removed. This can't be undone."
+          onConfirm={() => performDeletePlan(confirmDeletePlan.id)}
+          onCancel={() => setConfirmDeletePlan(null)}
+        />
+      )}
     </div>
   );
 }
@@ -469,6 +586,9 @@ function CustomerDetail({ customer, onBack }) {
 function Devices() {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [editDraft, setEditDraft] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
 
@@ -486,6 +606,24 @@ function Devices() {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
     await supabase.from("devices").update({ is_locked: command === "LOCK" }).eq("id", device.id);
+    load();
+  }
+
+  function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model, imei: d.imei || "" }); setError(""); }
+
+  async function saveEdit() {
+    if (!editDraft.device_model.trim()) { setError("Enter a device model."); return; }
+    await supabase.from("devices").update({
+      device_model: editDraft.device_model.trim(),
+      imei: editDraft.imei.trim() || null,
+    }).eq("id", editDraft.id);
+    setEditDraft(null);
+    load();
+  }
+
+  async function performDelete(id) {
+    await supabase.from("devices").delete().eq("id", id);
+    setConfirmDelete(null);
     load();
   }
 
@@ -514,15 +652,19 @@ function Devices() {
                   </td>
                   <td style={S.td} className="mono">{d.last_seen_at ? new Date(d.last_seen_at).toLocaleDateString() : "never"}</td>
                   <td style={{ ...S.td, textAlign: "right" }}>
-                    {d.is_locked ? (
-                      <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => sendCommand(d, "UNLOCK")}>
-                        <Unlock size={13} /> Unlock
-                      </button>
-                    ) : (
-                      <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => sendCommand(d, "LOCK")}>
-                        <LockIcon size={13} /> Lock
-                      </button>
-                    )}
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {d.is_locked ? (
+                        <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => sendCommand(d, "UNLOCK")}>
+                          <Unlock size={13} /> Unlock
+                        </button>
+                      ) : (
+                        <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => sendCommand(d, "LOCK")}>
+                          <LockIcon size={13} /> Lock
+                        </button>
+                      )}
+                      <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -530,6 +672,26 @@ function Devices() {
           </tbody>
         </table>
       </div>
+
+      {editDraft && (
+        <Drawer title="Edit device" onClose={() => setEditDraft(null)}>
+          <Field label="Device model" error={error}><input style={S.input} value={editDraft.device_model} onChange={(e) => setEditDraft({ ...editDraft, device_model: e.target.value })} /></Field>
+          <Field label="IMEI (optional)"><input style={S.input} value={editDraft.imei} onChange={(e) => setEditDraft({ ...editDraft, imei: e.target.value })} /></Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={S.primaryBtn} onClick={saveEdit}>Save changes</button>
+            <button style={S.secondaryBtn} onClick={() => setEditDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Remove device"
+          message={`${confirmDelete.device_model} and its installment plans/payment history will be removed. This can't be undone.`}
+          onConfirm={() => performDelete(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }
@@ -540,6 +702,9 @@ function Payments() {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("All");
+  const [editDraft, setEditDraft] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
 
@@ -555,6 +720,24 @@ function Payments() {
 
   async function markPaid(id) {
     await supabase.from("payments").update({ status: "Paid", paid_at: new Date().toISOString() }).eq("id", id);
+    load();
+  }
+
+  function openEdit(p) { setEditDraft({ id: p.id, amount: p.amount, due_date: p.due_date, status: p.status }); setError(""); }
+
+  async function saveEdit() {
+    const amt = Number(editDraft.amount);
+    if (!amt || !editDraft.due_date) { setError("Enter amount and due date."); return; }
+    const payload = { amount: amt, due_date: editDraft.due_date, status: editDraft.status };
+    payload.paid_at = editDraft.status === "Paid" ? new Date().toISOString() : null;
+    await supabase.from("payments").update(payload).eq("id", editDraft.id);
+    setEditDraft(null);
+    load();
+  }
+
+  async function performDelete(id) {
+    await supabase.from("payments").delete().eq("id", id);
+    setConfirmDelete(null);
     load();
   }
 
@@ -591,9 +774,13 @@ function Payments() {
                   <td style={S.td}>{money(p.amount)}</td>
                   <td style={S.td}><span style={{ fontSize: 13, color }}>{effectiveStatus}</span></td>
                   <td style={{ ...S.td, textAlign: "right" }}>
-                    {effectiveStatus !== "Paid" && (
-                      <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => markPaid(p.id)}>Mark paid</button>
-                    )}
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {effectiveStatus !== "Paid" && (
+                        <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => markPaid(p.id)}>Mark paid</button>
+                      )}
+                      <button style={S.iconBtn} onClick={() => openEdit(p)} aria-label="Edit"><Pencil size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => setConfirmDelete(p)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -601,6 +788,32 @@ function Payments() {
           </tbody>
         </table>
       </div>
+
+      {editDraft && (
+        <Drawer title="Edit payment" onClose={() => setEditDraft(null)}>
+          <Field label="Amount"><input style={S.input} type="number" value={editDraft.amount} onChange={(e) => setEditDraft({ ...editDraft, amount: e.target.value })} /></Field>
+          <Field label="Due date"><input style={S.input} type="date" value={editDraft.due_date} onChange={(e) => setEditDraft({ ...editDraft, due_date: e.target.value })} /></Field>
+          <Field label="Status">
+            <select style={{ ...S.select, width: "100%" }} value={editDraft.status} onChange={(e) => setEditDraft({ ...editDraft, status: e.target.value })}>
+              {["Pending", "Paid", "Missed"].map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </Field>
+          {error && <p style={{ fontSize: 12, color: "#E5636A" }}>{error}</p>}
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={S.primaryBtn} onClick={saveEdit}>Save changes</button>
+            <button style={S.secondaryBtn} onClick={() => setEditDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Remove payment"
+          message="This payment record will be permanently removed. This can't be undone."
+          onConfirm={() => performDelete(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
     </div>
   );
 }
