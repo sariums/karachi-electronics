@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
 
     await supabase
       .from("devices")
-      .update({ is_locked: false, unlock_pin: null, unlock_pin_generated_at: null })
+      .update({ is_locked: false })
       .eq("id", device.id);
 
     await supabase

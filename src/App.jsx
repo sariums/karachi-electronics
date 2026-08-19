@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
-  History, KeyRound,
+  History, KeyRound, RefreshCw,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -380,10 +380,13 @@ function CustomerDetail({ customer, onBack }) {
   async function addDevice() {
     if (!deviceDraft.device_model.trim()) { setError("Enter a device model."); return; }
     setError("");
+    const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
     await supabase.from("devices").insert({
       customer_id: customer.id,
       device_model: deviceDraft.device_model.trim(),
       imei: deviceDraft.imei.trim() || null,
+      unlock_pin,
+      unlock_pin_generated_at: new Date().toISOString(),
     });
     setDeviceDraft({ device_model: "", imei: "" });
     setDeviceDrawer(false);
@@ -647,18 +650,7 @@ function Devices() {
   async function sendCommand(device, command) {
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
-
-    const updates = { is_locked: command === "LOCK" };
-    let generatedPin = null;
-    if (command === "LOCK") {
-      generatedPin = String(Math.floor(100000 + Math.random() * 900000));
-      updates.unlock_pin = generatedPin;
-      updates.unlock_pin_generated_at = new Date().toISOString();
-    } else {
-      updates.unlock_pin = null;
-      updates.unlock_pin_generated_at = null;
-    }
-    await supabase.from("devices").update(updates).eq("id", device.id);
+    await supabase.from("devices").update({ is_locked: command === "LOCK" }).eq("id", device.id);
 
     await supabase.from("device_events").insert({
       device_id: device.id,
@@ -668,15 +660,22 @@ function Devices() {
 
     supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
 
-    if (generatedPin) {
-      setCodeDialog({ code: generatedPin, note: "Give this to the customer only if they call in without internet access." });
-    }
-
     load();
   }
 
   function showCode(device) {
+    if (!device.unlock_pin) { setCodeDialog({ code: "—", note: "No code set for this device yet." }); return; }
     setCodeDialog({ code: device.unlock_pin, note: null });
+  }
+
+  async function resetUnlockCode(device) {
+    const newPin = String(Math.floor(100000 + Math.random() * 900000));
+    await supabase.from("devices").update({
+      unlock_pin: newPin,
+      unlock_pin_generated_at: new Date().toISOString(),
+    }).eq("id", device.id);
+    setCodeDialog({ code: newPin, note: "Old code is no longer valid. Give this new one to the customer." });
+    load();
   }
 
   async function openHistory(device) {
@@ -764,9 +763,8 @@ function Devices() {
                         </button>
                       )}
                       <button style={S.iconBtn} onClick={() => openNotify(d)} aria-label="Send notification"><Bell size={15} /></button>
-                      {d.is_locked && d.unlock_pin && (
-                        <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
-                      )}
+                      <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => resetUnlockCode(d)} aria-label="Reset unlock code"><RefreshCw size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
                       <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
