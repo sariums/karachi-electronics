@@ -19,6 +19,18 @@ function formatEventTime(iso) {
   return `${datePart}, ${timePart}`;
 }
 
+function formatRelativeTime(iso) {
+  if (!iso) return null;
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
@@ -485,11 +497,17 @@ function CustomerDetail({ customer, onBack }) {
             <div>
               <p style={{ fontSize: 14.5, color: "#EDEEF2", fontWeight: 500, margin: 0 }}>{d.device_model}</p>
               <p className="mono" style={{ fontSize: 12, color: "#8891A3", margin: "2px 0 0" }}>{d.imei || "no IMEI set"}</p>
+              {d.sim_missing && d.sim_status_updated_at && (
+                <p style={{ fontSize: 11.5, color: "#E5A63A", margin: "4px 0 0" }}>SIM missing since {formatRelativeTime(d.sim_status_updated_at)}</p>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ ...S.badge, background: d.is_locked ? "#3A1416" : "#0F2F2C", color: d.is_locked ? "#E5636A" : "#4FCFC0" }}>
                 {d.is_locked ? "Locked" : "Active"}
               </span>
+              {d.sim_missing && (
+                <span style={{ ...S.badge, background: "#3A2A14", color: "#E5A63A" }}>No SIM</span>
+              )}
               <button style={S.iconBtn} onClick={() => openEditDevice(d)} aria-label="Edit device"><Pencil size={15} /></button>
               <button style={S.iconBtn} onClick={() => setConfirmDeleteDevice(d)} aria-label="Delete device"><Trash2 size={15} color="#E5636A" /></button>
             </div>
@@ -728,6 +746,9 @@ function Devices() {
                     <span style={{ ...S.badge, background: d.is_locked ? "#3A1416" : "#0F2F2C", color: d.is_locked ? "#E5636A" : "#4FCFC0" }}>
                       {d.is_locked ? "Locked" : "Active"}
                     </span>
+                    {d.sim_missing && (
+                      <span style={{ ...S.badge, background: "#3A2A14", color: "#E5A63A", marginLeft: 6 }}>No SIM</span>
+                    )}
                     {pendingAck && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
                   </td>
                   <td style={S.td} className="mono">{d.last_seen_at ? new Date(d.last_seen_at).toLocaleDateString() : "never"}</td>
