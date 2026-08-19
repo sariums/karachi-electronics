@@ -603,6 +603,7 @@ function Devices() {
   const [notifyDraft, setNotifyDraft] = useState(null);
   const [sending, setSending] = useState(false);
   const [historyDraft, setHistoryDraft] = useState(null);
+  const [codeDialog, setCodeDialog] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
@@ -650,14 +651,14 @@ function Devices() {
     supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
 
     if (generatedPin) {
-      alert(`Unlock code for this device: ${generatedPin}\n\nGive this to the customer only if they call in without internet access.`);
+      setCodeDialog({ code: generatedPin, note: "Give this to the customer only if they call in without internet access." });
     }
 
     load();
   }
 
   function showCode(device) {
-    alert(`Unlock code: ${device.unlock_pin}`);
+    setCodeDialog({ code: device.unlock_pin, note: null });
   }
 
   async function openHistory(device) {
@@ -791,6 +792,10 @@ function Devices() {
             </div>
           ))}
         </Drawer>
+      )}
+
+      {codeDialog && (
+        <CodeDialog code={codeDialog.code} note={codeDialog.note} onClose={() => setCodeDialog(null)} />
       )}
 
       {editDraft && (
@@ -1079,6 +1084,19 @@ function Drawer({ title, onClose, children }) {
           <button style={S.iconBtn} onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         {children}
+      </div>
+    </div>
+  );
+}
+
+function CodeDialog({ code, note, onClose }) {
+  return (
+    <div style={S.overlay} onClick={onClose}>
+      <div style={S.confirmCard} onClick={(e) => e.stopPropagation()}>
+        <h3 className="serif" style={{ fontSize: 18, color: "#EDEEF2", margin: "0 0 8px" }}>Unlock code</h3>
+        <p className="mono" style={{ fontSize: 32, letterSpacing: 4, color: "#F2A93C", margin: "8px 0 16px" }}>{code}</p>
+        {note && <p style={{ fontSize: 13.5, color: "#8891A3", margin: "0 0 20px", lineHeight: 1.6 }}>{note}</p>}
+        <button style={S.primaryBtn} onClick={onClose}>Close</button>
       </div>
     </div>
   );
