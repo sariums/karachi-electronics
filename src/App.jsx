@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
-  History, KeyRound, RefreshCw,
+  History, KeyRound, RefreshCw, LayoutGrid,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -625,6 +625,7 @@ function Devices() {
   const [sending, setSending] = useState(false);
   const [historyDraft, setHistoryDraft] = useState(null);
   const [codeDialog, setCodeDialog] = useState(null);
+  const [appsDraft, setAppsDraft] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
@@ -686,6 +687,21 @@ function Devices() {
       .eq("device_id", device.id)
       .order("occurred_at", { ascending: false });
     setHistoryDraft({ device, events: data || [], loading: false });
+  }
+
+  async function openApps(device) {
+    setAppsDraft({ device, apps: [], loading: true, filter: "" });
+    const { data } = await supabase
+      .from("device_apps")
+      .select("*")
+      .eq("device_id", device.id)
+      .order("app_name", { ascending: true });
+    setAppsDraft({ device, apps: data || [], loading: false, filter: "" });
+  }
+
+  async function toggleAppWhitelist(app, checked) {
+    setAppsDraft((prev) => (prev ? { ...prev, apps: prev.apps.map((a) => (a.id === app.id ? { ...a, is_whitelisted: checked } : a)) } : prev));
+    await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
   }
 
   function openNotify(d) { setNotifyDraft({ device: d, message: "" }); setError(""); }
@@ -766,6 +782,7 @@ function Devices() {
                       <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
                       <button style={S.iconBtn} onClick={() => resetUnlockCode(d)} aria-label="Reset unlock code"><RefreshCw size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => openApps(d)} aria-label="Allowed apps"><LayoutGrid size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
                       <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
                     </div>
@@ -810,6 +827,40 @@ function Devices() {
               <p className="mono" style={{ fontSize: 12, color: "#8891A3", margin: "2px 0 0" }}>{formatEventTime(ev.occurred_at)}</p>
             </div>
           ))}
+        </Drawer>
+      )}
+
+      {appsDraft && (
+        <Drawer title={`Allowed apps · ${appsDraft.device.customers?.name || appsDraft.device.device_model}`} onClose={() => setAppsDraft(null)}>
+          {appsDraft.loading && <p style={{ color: "#5C6478", fontSize: 13 }}>Loading…</p>}
+          {!appsDraft.loading && appsDraft.apps.length === 0 && (
+            <p style={{ color: "#5C6478", fontSize: 13 }}>No apps reported yet — this phone hasn't checked in.</p>
+          )}
+          {!appsDraft.loading && appsDraft.apps.length > 0 && (
+            <>
+              {appsDraft.apps.length > 15 && (
+                <input
+                  style={{ ...S.input, marginBottom: 14 }}
+                  placeholder="Search apps…"
+                  value={appsDraft.filter}
+                  onChange={(e) => setAppsDraft({ ...appsDraft, filter: e.target.value })}
+                />
+              )}
+              <div style={{ maxHeight: 520, overflowY: "auto" }}>
+                {appsDraft.apps
+                  .filter((app) => app.app_name.toLowerCase().includes(appsDraft.filter.toLowerCase()))
+                  .map((app) => (
+                    <label key={app.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #1B1E27", cursor: "pointer" }}>
+                      <input type="checkbox" checked={app.is_whitelisted} onChange={(e) => toggleAppWhitelist(app, e.target.checked)} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13.5, color: "#EDEEF2", margin: 0 }}>{app.app_name}</p>
+                        <p className="mono" style={{ fontSize: 11, color: "#5C6478", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.package_name}</p>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+            </>
+          )}
         </Drawer>
       )}
 
