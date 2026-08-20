@@ -45,7 +45,7 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
-  if (!authChecked) return <div style={{ minHeight: "100vh", background: "#0F1115" }} />;
+  if (!authChecked) return <div style={{ minHeight: "100vh", background: "#F5F6F8" }} />;
   if (!session) return <LoginScreen />;
 
   return (
@@ -68,14 +68,14 @@ function GlobalStyle() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
       * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
-      html, body { margin: 0; padding: 0; background: #0F1115; color-scheme: dark; }
+      html, body { margin: 0; padding: 0; background: #F5F6F8; color-scheme: light; }
       #root { min-height: 100vh; }
       .serif { font-family: 'Fraunces', serif; }
       .mono { font-family: 'JetBrains Mono', monospace; }
       input, select { outline: none; }
       input:focus, select:focus { box-shadow: 0 0 0 2px #F2A93C55; border-color: #F2A93C !important; }
       button { cursor: pointer; }
-      ::placeholder { color: #5C6478; }
+      ::placeholder { color: #9AA1AE; }
     `}</style>
   );
 }
@@ -107,26 +107,26 @@ function LoginScreen() {
       <div style={S.loginCard}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
           <div style={S.logoMark}>N</div>
-          <span className="serif" style={{ fontSize: 18, color: "#EDEEF2" }}>Northline</span>
+          <span className="serif" style={{ fontSize: 18, color: "#14161C" }}>Northline</span>
         </div>
-        <h1 className="serif" style={{ fontSize: 24, color: "#EDEEF2", margin: "0 0 6px" }}>
+        <h1 className="serif" style={{ fontSize: 24, color: "#14161C", margin: "0 0 6px" }}>
           {mode === "signIn" ? "Sign in" : "Create account"}
         </h1>
-        <p style={{ fontSize: 13.5, color: "#8891A3", margin: "0 0 24px" }}>Installment device admin panel.</p>
+        <p style={{ fontSize: 13.5, color: "#6B7280", margin: "0 0 24px" }}>Installment device admin panel.</p>
 
         <Field label="Email">
           <div style={S.iconInputWrap}>
-            <Mail size={15} color="#5C6478" />
+            <Mail size={15} color="#9AA1AE" />
             <input style={S.iconInput} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="you@company.com" onKeyDown={(e) => e.key === "Enter" && submit()} />
           </div>
         </Field>
         <Field label="Password">
           <div style={S.iconInputWrap}>
-            <Lock size={15} color="#5C6478" />
+            <Lock size={15} color="#9AA1AE" />
             <input type="password" style={S.iconInput} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" onKeyDown={(e) => e.key === "Enter" && submit()} />
           </div>
         </Field>
-        {error && <p style={{ fontSize: 12.5, color: "#E5636A", margin: "0 0 12px" }}>{error}</p>}
+        {error && <p style={{ fontSize: 12.5, color: "#D6414C", margin: "0 0 12px" }}>{error}</p>}
 
         <button style={{ ...S.primaryBtn, width: "100%", justifyContent: "center", marginTop: 6, opacity: busy ? 0.7 : 1 }} onClick={submit} disabled={busy}>
           {busy ? "Please wait…" : mode === "signIn" ? "Sign in" : "Sign up"}
@@ -153,7 +153,7 @@ function Sidebar({ tab, setTab, email }) {
     <aside style={S.sidebar}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 40 }}>
         <div style={S.logoMark}>N</div>
-        <span className="serif" style={{ fontSize: 18, color: "#EDEEF2" }}>Northline</span>
+        <span className="serif" style={{ fontSize: 18, color: "#14161C" }}>Northline</span>
       </div>
       <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {items.map((it) => {
@@ -167,9 +167,9 @@ function Sidebar({ tab, setTab, email }) {
           );
         })}
       </nav>
-      <div style={{ marginTop: "auto", paddingTop: 24, borderTop: "1px solid #262B36" }}>
-        <p style={{ fontSize: 12, color: "#5C6478", margin: 0 }}>Signed in as</p>
-        <p style={{ fontSize: 13, color: "#C7CCD9", margin: "4px 0 0", wordBreak: "break-all" }}>{email}</p>
+      <div style={{ marginTop: "auto", paddingTop: 24, borderTop: "1px solid #E6E8EC" }}>
+        <p style={{ fontSize: 12, color: "#9AA1AE", margin: 0 }}>Signed in as</p>
+        <p style={{ fontSize: 13, color: "#374151", margin: "4px 0 0", wordBreak: "break-all" }}>{email}</p>
         <button style={S.logoutBtn} onClick={() => supabase.auth.signOut()}>
           <LogOut size={14} /> Log out
         </button>
@@ -221,11 +221,11 @@ function Dashboard() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 28 }}>
         <StatCard label="Total customers" value={stats.customers} />
         <StatCard label="Total devices" value={stats.devices} />
-        <StatCard label="Locked now" value={stats.locked} accent="#E5636A" />
+        <StatCard label="Locked now" value={stats.locked} accent="#D6414C" />
         <StatCard label="Overdue payments" value={stats.overdue} accent="#F2A93C" />
       </div>
 
-      <h3 className="serif" style={{ fontSize: 16, color: "#EDEEF2", margin: "0 0 12px" }}>Overdue this period</h3>
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Overdue this period</h3>
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>{["Customer", "Device", "Due date", "Amount"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
@@ -311,14 +311,14 @@ function Customers() {
                 <td style={{ ...S.td, cursor: "pointer" }} onClick={() => setSelected(c)}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={S.avatar}>{initials(c.name)}</div>
-                    <span style={{ fontSize: 13.5, color: "#EDEEF2", fontWeight: 500 }}>{c.name}</span>
+                    <span style={{ fontSize: 13.5, color: "#14161C", fontWeight: 500 }}>{c.name}</span>
                   </div>
                 </td>
                 <td style={S.td} className="mono">{c.phone_number}</td>
                 <td style={S.td}>{c.devices?.length || 0}</td>
                 <td style={{ ...S.td, textAlign: "right" }}>
                   <button style={S.iconBtn} onClick={() => openEdit(c)} aria-label="Edit"><Pencil size={15} /></button>
-                  <button style={{ ...S.iconBtn, marginLeft: 4 }} onClick={() => setConfirmDelete(c)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
+                  <button style={{ ...S.iconBtn, marginLeft: 4 }} onClick={() => setConfirmDelete(c)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
                 </td>
               </tr>
             ))}
@@ -489,41 +489,41 @@ function CustomerDetail({ customer, onBack }) {
       <PageHeader eyebrow="Customer" title={customer.name}>
         <button style={S.primaryBtn} onClick={() => setDeviceDrawer(true)}><Plus size={16} /> Add device</button>
       </PageHeader>
-      <p style={{ fontSize: 13.5, color: "#8891A3", margin: "-16px 0 24px" }} className="mono">{customer.phone_number}</p>
+      <p style={{ fontSize: 13.5, color: "#6B7280", margin: "-16px 0 24px" }} className="mono">{customer.phone_number}</p>
 
-      {loading && <p style={{ color: "#5C6478", fontSize: 13 }}>Loading…</p>}
-      {!loading && devices.length === 0 && <p style={{ color: "#5C6478", fontSize: 13 }}>No devices yet.</p>}
+      {loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
+      {!loading && devices.length === 0 && <p style={{ color: "#9AA1AE", fontSize: 13 }}>No devices yet.</p>}
 
       {devices.map((d) => (
         <div key={d.id} style={{ ...S.statCard, marginBottom: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <div>
-              <p style={{ fontSize: 14.5, color: "#EDEEF2", fontWeight: 500, margin: 0 }}>{d.device_model}</p>
-              <p className="mono" style={{ fontSize: 12, color: "#8891A3", margin: "2px 0 0" }}>{d.imei || "no IMEI set"}</p>
+              <p style={{ fontSize: 14.5, color: "#14161C", fontWeight: 500, margin: 0 }}>{d.device_model}</p>
+              <p className="mono" style={{ fontSize: 12, color: "#6B7280", margin: "2px 0 0" }}>{d.imei || "no IMEI set"}</p>
               {d.sim_missing && d.sim_status_updated_at && (
-                <p style={{ fontSize: 11.5, color: "#E5A63A", margin: "4px 0 0" }}>SIM missing since {formatRelativeTime(d.sim_status_updated_at)}</p>
+                <p style={{ fontSize: 11.5, color: "#AD6A0C", margin: "4px 0 0" }}>SIM missing since {formatRelativeTime(d.sim_status_updated_at)}</p>
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ ...S.badge, background: d.is_locked ? "#3A1416" : "#0F2F2C", color: d.is_locked ? "#E5636A" : "#4FCFC0" }}>
+              <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
                 {d.is_locked ? "Locked" : "Active"}
               </span>
               {d.sim_missing && (
-                <span style={{ ...S.badge, background: "#3A2A14", color: "#E5A63A" }}>No SIM</span>
+                <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C" }}>No SIM</span>
               )}
               <button style={S.iconBtn} onClick={() => openEditDevice(d)} aria-label="Edit device"><Pencil size={15} /></button>
-              <button style={S.iconBtn} onClick={() => setConfirmDeleteDevice(d)} aria-label="Delete device"><Trash2 size={15} color="#E5636A" /></button>
+              <button style={S.iconBtn} onClick={() => setConfirmDeleteDevice(d)} aria-label="Delete device"><Trash2 size={15} color="#D6414C" /></button>
             </div>
           </div>
           {d.installment_plans?.length > 0 ? (
             d.installment_plans.map((p) => (
               <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, margin: "4px 0" }}>
-                <p style={{ fontSize: 12.5, color: "#8891A3", margin: 0 }}>
-                  Plan: {money(p.total_amount)} total, {money(p.monthly_amount)}/mo for {p.number_of_months} months, due day {p.due_day} — <span style={{ color: "#C7CCD9" }}>{p.status}</span>
+                <p style={{ fontSize: 12.5, color: "#6B7280", margin: 0 }}>
+                  Plan: {money(p.total_amount)} total, {money(p.monthly_amount)}/mo for {p.number_of_months} months, due day {p.due_day} — <span style={{ color: "#374151" }}>{p.status}</span>
                 </p>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                   <button style={S.iconBtn} onClick={() => openEditPlan(p)} aria-label="Edit plan"><Pencil size={13} /></button>
-                  <button style={S.iconBtn} onClick={() => setConfirmDeletePlan(p)} aria-label="Delete plan"><Trash2 size={13} color="#E5636A" /></button>
+                  <button style={S.iconBtn} onClick={() => setConfirmDeletePlan(p)} aria-label="Delete plan"><Trash2 size={13} color="#D6414C" /></button>
                 </div>
               </div>
             ))
@@ -539,7 +539,7 @@ function CustomerDetail({ customer, onBack }) {
         <Drawer title="Add device" onClose={() => setDeviceDrawer(false)}>
           <Field label="Device model"><input style={S.input} value={deviceDraft.device_model} onChange={(e) => setDeviceDraft({ ...deviceDraft, device_model: e.target.value })} placeholder="Samsung Galaxy A15" /></Field>
           <Field label="IMEI (optional)"><input style={S.input} value={deviceDraft.imei} onChange={(e) => setDeviceDraft({ ...deviceDraft, imei: e.target.value })} placeholder="356789104561234" /></Field>
-          {error && <p style={{ fontSize: 12, color: "#E5636A" }}>{error}</p>}
+          {error && <p style={{ fontSize: 12, color: "#D6414C" }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={S.primaryBtn} onClick={addDevice}>Add device</button>
             <button style={S.secondaryBtn} onClick={() => setDeviceDrawer(false)}>Cancel</button>
@@ -554,7 +554,7 @@ function CustomerDetail({ customer, onBack }) {
           <Field label="Number of months"><input style={S.input} type="number" value={planDraft.number_of_months} onChange={(e) => setPlanDraft({ ...planDraft, number_of_months: e.target.value })} placeholder="12" /></Field>
           <Field label="Start date"><input style={S.input} type="date" value={planDraft.start_date} onChange={(e) => setPlanDraft({ ...planDraft, start_date: e.target.value })} /></Field>
           <Field label="Due day of month"><input style={S.input} type="number" min="1" max="31" value={planDraft.due_day} onChange={(e) => setPlanDraft({ ...planDraft, due_day: e.target.value })} /></Field>
-          {error && <p style={{ fontSize: 12, color: "#E5636A" }}>{error}</p>}
+          {error && <p style={{ fontSize: 12, color: "#D6414C" }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={S.primaryBtn} onClick={() => addPlan(planDrawerFor)}>Create plan</button>
             <button style={S.secondaryBtn} onClick={() => setPlanDrawerFor(null)}>Cancel</button>
@@ -594,7 +594,7 @@ function CustomerDetail({ customer, onBack }) {
               {["Active", "Completed", "Defaulted"].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
-          {error && <p style={{ fontSize: 12, color: "#E5636A" }}>{error}</p>}
+          {error && <p style={{ fontSize: 12, color: "#D6414C" }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={S.primaryBtn} onClick={saveEditPlan}>Save changes</button>
             <button style={S.secondaryBtn} onClick={() => setPlanEditDraft(null)}>Cancel</button>
@@ -758,11 +758,11 @@ function Devices() {
                   <td style={S.td}>{d.device_model}</td>
                   <td style={S.td} className="mono">{d.imei || "—"}</td>
                   <td style={S.td}>
-                    <span style={{ ...S.badge, background: d.is_locked ? "#3A1416" : "#0F2F2C", color: d.is_locked ? "#E5636A" : "#4FCFC0" }}>
+                    <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
                       {d.is_locked ? "Locked" : "Active"}
                     </span>
                     {d.sim_missing && (
-                      <span style={{ ...S.badge, background: "#3A2A14", color: "#E5A63A", marginLeft: 6 }}>No SIM</span>
+                      <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>No SIM</span>
                     )}
                     {pendingAck && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
                   </td>
@@ -784,7 +784,7 @@ function Devices() {
                       <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openApps(d)} aria-label="Allowed apps"><LayoutGrid size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
+                      <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
                     </div>
                   </td>
                 </tr>
@@ -815,16 +815,16 @@ function Devices() {
 
       {historyDraft && (
         <Drawer title={`Activity · ${historyDraft.device.customers?.name || historyDraft.device.device_model}`} onClose={() => setHistoryDraft(null)}>
-          {historyDraft.loading && <p style={{ color: "#5C6478", fontSize: 13 }}>Loading…</p>}
+          {historyDraft.loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
           {!historyDraft.loading && historyDraft.events.length === 0 && (
-            <p style={{ color: "#5C6478", fontSize: 13 }}>No activity yet.</p>
+            <p style={{ color: "#9AA1AE", fontSize: 13 }}>No activity yet.</p>
           )}
           {!historyDraft.loading && historyDraft.events.map((ev) => (
-            <div key={ev.id} style={{ padding: "10px 0", borderBottom: "1px solid #1B1E27" }}>
-              <p style={{ fontSize: 13.5, color: "#EDEEF2", margin: 0 }}>
+            <div key={ev.id} style={{ padding: "10px 0", borderBottom: "1px solid #EEF0F3" }}>
+              <p style={{ fontSize: 13.5, color: "#14161C", margin: 0 }}>
                 {ev.event_type === "LOCK" ? "Locked" : "Unlocked"} via {ev.method === "PIN_CODE" ? "code" : "admin"}
               </p>
-              <p className="mono" style={{ fontSize: 12, color: "#8891A3", margin: "2px 0 0" }}>{formatEventTime(ev.occurred_at)}</p>
+              <p className="mono" style={{ fontSize: 12, color: "#6B7280", margin: "2px 0 0" }}>{formatEventTime(ev.occurred_at)}</p>
             </div>
           ))}
         </Drawer>
@@ -832,9 +832,9 @@ function Devices() {
 
       {appsDraft && (
         <Drawer title={`Allowed apps · ${appsDraft.device.customers?.name || appsDraft.device.device_model}`} onClose={() => setAppsDraft(null)}>
-          {appsDraft.loading && <p style={{ color: "#5C6478", fontSize: 13 }}>Loading…</p>}
+          {appsDraft.loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
           {!appsDraft.loading && appsDraft.apps.length === 0 && (
-            <p style={{ color: "#5C6478", fontSize: 13 }}>No apps reported yet — this phone hasn't checked in.</p>
+            <p style={{ color: "#9AA1AE", fontSize: 13 }}>No apps reported yet — this phone hasn't checked in.</p>
           )}
           {!appsDraft.loading && appsDraft.apps.length > 0 && (
             <>
@@ -850,11 +850,11 @@ function Devices() {
                 {appsDraft.apps
                   .filter((app) => app.app_name.toLowerCase().includes(appsDraft.filter.toLowerCase()))
                   .map((app) => (
-                    <label key={app.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #1B1E27", cursor: "pointer" }}>
+                    <label key={app.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #EEF0F3", cursor: "pointer" }}>
                       <input type="checkbox" checked={app.is_whitelisted} onChange={(e) => toggleAppWhitelist(app, e.target.checked)} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <p style={{ fontSize: 13.5, color: "#EDEEF2", margin: 0 }}>{app.app_name}</p>
-                        <p className="mono" style={{ fontSize: 11, color: "#5C6478", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.package_name}</p>
+                        <p style={{ fontSize: 13.5, color: "#14161C", margin: 0 }}>{app.app_name}</p>
+                        <p className="mono" style={{ fontSize: 11, color: "#9AA1AE", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.package_name}</p>
                       </div>
                     </label>
                   ))}
@@ -960,7 +960,7 @@ function Payments() {
             {!loading && filtered.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No payments match this filter.</td></tr>}
             {filtered.map((p) => {
               const effectiveStatus = p.status === "Pending" && p.due_date < today ? "Missed" : p.status;
-              const color = effectiveStatus === "Paid" ? "#4FCFC0" : effectiveStatus === "Missed" ? "#E5636A" : "#F2A93C";
+              const color = effectiveStatus === "Paid" ? "#0E9488" : effectiveStatus === "Missed" ? "#D6414C" : "#F2A93C";
               return (
                 <tr key={p.id} style={S.tr}>
                   <td style={S.td}>{p.installment_plans?.devices?.customers?.name || "—"}</td>
@@ -974,7 +974,7 @@ function Payments() {
                         <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => markPaid(p.id)}>Mark paid</button>
                       )}
                       <button style={S.iconBtn} onClick={() => openEdit(p)} aria-label="Edit"><Pencil size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => setConfirmDelete(p)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
+                      <button style={S.iconBtn} onClick={() => setConfirmDelete(p)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
                     </div>
                   </td>
                 </tr>
@@ -993,7 +993,7 @@ function Payments() {
               {["Pending", "Paid", "Missed"].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </Field>
-          {error && <p style={{ fontSize: 12, color: "#E5636A" }}>{error}</p>}
+          {error && <p style={{ fontSize: 12, color: "#D6414C" }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={S.primaryBtn} onClick={saveEdit}>Save changes</button>
             <button style={S.secondaryBtn} onClick={() => setEditDraft(null)}>Cancel</button>
@@ -1062,7 +1062,7 @@ function WhitelistedNumbers() {
       <PageHeader eyebrow="Config" title="Whitelisted Numbers" count={numbers.length}>
         <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Add number</button>
       </PageHeader>
-      <p style={{ fontSize: 13, color: "#8891A3", margin: "-20px 0 24px", maxWidth: 520 }}>
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 520 }}>
         Locked phones show a "Call {"{label}"}" button for each number below — these are the only numbers a locked customer can reach.
       </p>
 
@@ -1078,7 +1078,7 @@ function WhitelistedNumbers() {
                 <td style={S.td} className="mono">{n.phone_number}</td>
                 <td style={{ ...S.td, textAlign: "right" }}>
                   <button style={S.iconBtn} onClick={() => openEdit(n)} aria-label="Edit"><Pencil size={15} /></button>
-                  <button style={{ ...S.iconBtn, marginLeft: 4 }} onClick={() => setConfirmDelete(n)} aria-label="Delete"><Trash2 size={15} color="#E5636A" /></button>
+                  <button style={{ ...S.iconBtn, marginLeft: 4 }} onClick={() => setConfirmDelete(n)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
                 </td>
               </tr>
             ))}
@@ -1118,7 +1118,7 @@ function PageHeader({ eyebrow, title, count, children }) {
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <h1 className="serif" style={S.h1}>
           {title}
-          {count != null && <span style={{ color: "#5C6478", fontSize: 22, marginLeft: 10 }}>{count}</span>}
+          {count != null && <span style={{ color: "#9AA1AE", fontSize: 22, marginLeft: 10 }}>{count}</span>}
         </h1>
         <div style={{ display: "flex", gap: 10 }}>{children}</div>
       </div>
@@ -1129,8 +1129,8 @@ function PageHeader({ eyebrow, title, count, children }) {
 function StatCard({ label, value, accent }) {
   return (
     <div style={S.statCard}>
-      <p style={{ fontSize: 12, color: "#8891A3", margin: "0 0 6px" }}>{label}</p>
-      <p className="serif" style={{ fontSize: 26, color: accent || "#EDEEF2", margin: 0 }}>{value}</p>
+      <p style={{ fontSize: 12, color: "#6B7280", margin: "0 0 6px" }}>{label}</p>
+      <p className="serif" style={{ fontSize: 26, color: accent || "#14161C", margin: 0 }}>{value}</p>
     </div>
   );
 }
@@ -1138,9 +1138,9 @@ function StatCard({ label, value, accent }) {
 function Field({ label, error, children }) {
   return (
     <div style={{ marginBottom: 16 }}>
-      <label style={{ display: "block", fontSize: 12.5, color: "#8891A3", marginBottom: 6 }}>{label}</label>
+      <label style={{ display: "block", fontSize: 12.5, color: "#6B7280", marginBottom: 6 }}>{label}</label>
       {children}
-      {error && <p style={{ fontSize: 12, color: "#E5636A", margin: "6px 0 0" }}>{error}</p>}
+      {error && <p style={{ fontSize: 12, color: "#D6414C", margin: "6px 0 0" }}>{error}</p>}
     </div>
   );
 }
@@ -1150,7 +1150,7 @@ function Drawer({ title, onClose, children }) {
     <div style={S.overlay} onClick={onClose}>
       <div style={S.drawer} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <h2 className="serif" style={{ fontSize: 20, color: "#EDEEF2", margin: 0 }}>{title}</h2>
+          <h2 className="serif" style={{ fontSize: 20, color: "#14161C", margin: 0 }}>{title}</h2>
           <button style={S.iconBtn} onClick={onClose} aria-label="Close"><X size={18} /></button>
         </div>
         {children}
@@ -1163,9 +1163,9 @@ function CodeDialog({ code, note, onClose }) {
   return (
     <div style={S.overlay} onClick={onClose}>
       <div style={S.confirmCard} onClick={(e) => e.stopPropagation()}>
-        <h3 className="serif" style={{ fontSize: 18, color: "#EDEEF2", margin: "0 0 8px" }}>Unlock code</h3>
+        <h3 className="serif" style={{ fontSize: 18, color: "#14161C", margin: "0 0 8px" }}>Unlock code</h3>
         <p className="mono" style={{ fontSize: 32, letterSpacing: 4, color: "#F2A93C", margin: "8px 0 16px" }}>{code}</p>
-        {note && <p style={{ fontSize: 13.5, color: "#8891A3", margin: "0 0 20px", lineHeight: 1.6 }}>{note}</p>}
+        {note && <p style={{ fontSize: 13.5, color: "#6B7280", margin: "0 0 20px", lineHeight: 1.6 }}>{note}</p>}
         <button style={S.primaryBtn} onClick={onClose}>Close</button>
       </div>
     </div>
@@ -1176,8 +1176,8 @@ function ConfirmDialog({ title, message, onConfirm, onCancel }) {
   return (
     <div style={S.overlay} onClick={onCancel}>
       <div style={S.confirmCard} onClick={(e) => e.stopPropagation()}>
-        <h3 className="serif" style={{ fontSize: 18, color: "#EDEEF2", margin: "0 0 8px" }}>{title}</h3>
-        <p style={{ fontSize: 13.5, color: "#8891A3", margin: "0 0 20px", lineHeight: 1.6 }}>{message}</p>
+        <h3 className="serif" style={{ fontSize: 18, color: "#14161C", margin: "0 0 8px" }}>{title}</h3>
+        <p style={{ fontSize: 13.5, color: "#6B7280", margin: "0 0 20px", lineHeight: 1.6 }}>{message}</p>
         <div style={{ display: "flex", gap: 10 }}>
           <button style={S.dangerBtn} onClick={onConfirm}>Confirm</button>
           <button style={S.secondaryBtn} onClick={onCancel}>Cancel</button>
@@ -1190,34 +1190,34 @@ function ConfirmDialog({ title, message, onConfirm, onCancel }) {
 /* ---------------- STYLES ---------------- */
 
 const S = {
-  loginPage: { minHeight: "100vh", background: "#0F1115", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 },
-  loginCard: { width: 380, background: "#171A21", border: "1px solid #21242D", borderRadius: 14, padding: "32px 28px" },
-  iconInputWrap: { display: "flex", alignItems: "center", gap: 8, background: "#171A21", border: "1px solid #2A2F3A", borderRadius: 8, padding: "9px 12px" },
-  iconInput: { background: "transparent", border: "none", color: "#EDEEF2", fontSize: 13.5, width: "100%", outline: "none" },
-  logoutBtn: { display: "flex", alignItems: "center", gap: 6, marginTop: 12, background: "transparent", border: "1px solid #2A2F3A", borderRadius: 7, padding: "6px 10px", fontSize: 12.5, color: "#8891A3" },
-  app: { display: "flex", minHeight: "100vh", background: "#0F1115", color: "#EDEEF2" },
-  sidebar: { width: 208, flexShrink: 0, background: "#12141A", borderRight: "1px solid #21242D", padding: "24px 18px", display: "flex", flexDirection: "column" },
+  loginPage: { minHeight: "100vh", background: "#F5F6F8", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 },
+  loginCard: { width: 380, background: "#FFFFFF", border: "1px solid #E6E8EC", borderRadius: 14, padding: "32px 28px" },
+  iconInputWrap: { display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", border: "1px solid #D8DCE3", borderRadius: 8, padding: "9px 12px" },
+  iconInput: { background: "transparent", border: "none", color: "#14161C", fontSize: 13.5, width: "100%", outline: "none" },
+  logoutBtn: { display: "flex", alignItems: "center", gap: 6, marginTop: 12, background: "transparent", border: "1px solid #D8DCE3", borderRadius: 7, padding: "6px 10px", fontSize: 12.5, color: "#6B7280" },
+  app: { display: "flex", minHeight: "100vh", background: "#F5F6F8", color: "#14161C" },
+  sidebar: { width: 208, flexShrink: 0, background: "#FFFFFF", borderRight: "1px solid #E6E8EC", padding: "24px 18px", display: "flex", flexDirection: "column" },
   logoMark: { width: 28, height: 28, borderRadius: 7, background: "#F2A93C", color: "#2C1E06", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 14 },
-  navItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 13.5, color: "#8891A3", cursor: "pointer" },
-  navItemActive: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 13.5, color: "#EDEEF2", background: "#1C2029", borderLeft: "2px solid #F2A93C", cursor: "pointer" },
+  navItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 13.5, color: "#6B7280", cursor: "pointer" },
+  navItemActive: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 13.5, color: "#14161C", background: "#FBF1E1", borderLeft: "2px solid #F2A93C", cursor: "pointer" },
   main: { flex: 1, padding: "36px 44px", maxWidth: 1080 },
-  eyebrow: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "#5C6478", margin: "0 0 6px" },
-  h1: { fontSize: 30, fontWeight: 500, margin: 0, color: "#EDEEF2" },
+  eyebrow: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "#9AA1AE", margin: "0 0 6px" },
+  h1: { fontSize: 30, fontWeight: 500, margin: 0, color: "#14161C" },
   primaryBtn: { display: "flex", alignItems: "center", gap: 7, background: "#F2A93C", color: "#2C1E06", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600 },
-  secondaryBtn: { background: "transparent", color: "#C7CCD9", border: "1px solid #2A2F3A", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 500 },
+  secondaryBtn: { background: "transparent", color: "#374151", border: "1px solid #D8DCE3", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 500 },
   dangerBtn: { background: "#E5636A", color: "#2C0A0C", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600 },
-  statCard: { background: "#171A21", border: "1px solid #21242D", borderRadius: 12, padding: "16px 18px" },
-  select: { background: "#171A21", border: "1px solid #2A2F3A", borderRadius: 8, color: "#C7CCD9", fontSize: 13.5, padding: "8px 12px" },
-  tableCard: { background: "#141720", border: "1px solid #21242D", borderRadius: 12, overflow: "hidden" },
-  th: { textAlign: "left", fontSize: 11.5, letterSpacing: 0.6, textTransform: "uppercase", color: "#5C6478", padding: "13px 16px", borderBottom: "1px solid #21242D", fontWeight: 500 },
-  tr: { borderBottom: "1px solid #1B1E27" },
-  td: { padding: "13px 16px", verticalAlign: "middle", fontSize: 13.5, color: "#C7CCD9" },
-  emptyCell: { padding: "36px 16px", textAlign: "center", color: "#5C6478", fontSize: 13 },
-  avatar: { width: 32, height: 32, borderRadius: "50%", background: "#20232C", color: "#C7CCD9", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 },
+  statCard: { background: "#FFFFFF", border: "1px solid #E6E8EC", borderRadius: 12, padding: "16px 18px" },
+  select: { background: "#FFFFFF", border: "1px solid #D8DCE3", borderRadius: 8, color: "#374151", fontSize: 13.5, padding: "8px 12px" },
+  tableCard: { background: "#FFFFFF", border: "1px solid #E6E8EC", borderRadius: 12, overflow: "hidden" },
+  th: { textAlign: "left", fontSize: 11.5, letterSpacing: 0.6, textTransform: "uppercase", color: "#9AA1AE", padding: "13px 16px", borderBottom: "1px solid #E6E8EC", fontWeight: 500 },
+  tr: { borderBottom: "1px solid #EEF0F3" },
+  td: { padding: "13px 16px", verticalAlign: "middle", fontSize: 13.5, color: "#374151" },
+  emptyCell: { padding: "36px 16px", textAlign: "center", color: "#9AA1AE", fontSize: 13 },
+  avatar: { width: 32, height: 32, borderRadius: "50%", background: "#EEF0F4", color: "#374151", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 600, flexShrink: 0 },
   badge: { fontSize: 12, fontWeight: 600, padding: "3px 10px", borderRadius: 20, display: "inline-block" },
-  iconBtn: { background: "transparent", border: "1px solid #2A2F3A", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center" },
-  overlay: { position: "fixed", inset: 0, background: "rgba(6,7,10,0.6)", display: "flex", justifyContent: "flex-end", zIndex: 50 },
-  drawer: { width: 380, background: "#12141A", borderLeft: "1px solid #21242D", height: "100%", padding: "28px 26px", overflowY: "auto" },
-  input: { width: "100%", background: "#171A21", border: "1px solid #2A2F3A", borderRadius: 8, color: "#EDEEF2", fontSize: 13.5, padding: "9px 12px" },
-  confirmCard: { margin: "auto", background: "#171A21", border: "1px solid #2A2F3A", borderRadius: 12, padding: 24, width: 360, alignSelf: "center", marginRight: 40 },
+  iconBtn: { background: "transparent", border: "1px solid #D8DCE3", borderRadius: 7, width: 28, height: 28, display: "inline-flex", alignItems: "center", justifyContent: "center" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(17,24,39,0.4)", display: "flex", justifyContent: "flex-end", zIndex: 50 },
+  drawer: { width: 380, background: "#FFFFFF", borderLeft: "1px solid #E6E8EC", height: "100%", padding: "28px 26px", overflowY: "auto" },
+  input: { width: "100%", background: "#FFFFFF", border: "1px solid #D8DCE3", borderRadius: 8, color: "#14161C", fontSize: 13.5, padding: "9px 12px" },
+  confirmCard: { margin: "auto", background: "#FFFFFF", border: "1px solid #D8DCE3", borderRadius: 12, padding: 24, width: 360, alignSelf: "center", marginRight: 40 },
 };
