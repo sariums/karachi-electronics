@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
-  History, KeyRound, RefreshCw, LayoutGrid,
+  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -626,6 +626,7 @@ function Devices() {
   const [historyDraft, setHistoryDraft] = useState(null);
   const [codeDialog, setCodeDialog] = useState(null);
   const [appsDraft, setAppsDraft] = useState(null);
+  const [callDraft, setCallDraft] = useState(null);
   const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
@@ -722,6 +723,26 @@ function Devices() {
     load();
   }
 
+  function openPushCall(d) { setCallDraft({ device: d, caller_number: "", message: "" }); setError(""); }
+
+  async function sendPushCall() {
+    if (!callDraft.caller_number.trim()) { setError("Enter a caller number."); return; }
+    if (!callDraft.message.trim()) { setError("Enter a message to speak."); return; }
+    setSending(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({
+      device_id: callDraft.device.id,
+      command: "PUSH_CALL",
+      caller_number: callDraft.caller_number.trim(),
+      message: callDraft.message.trim(),
+      issued_by: user?.email || "admin",
+    });
+    await supabase.functions.invoke("notify-devices", { body: { device_ids: [callDraft.device.id] } }).catch(() => {});
+    setSending(false);
+    setCallDraft(null);
+    load();
+  }
+
   function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model, imei: d.imei || "" }); setError(""); }
 
   async function saveEdit() {
@@ -779,6 +800,7 @@ function Devices() {
                         </button>
                       )}
                       <button style={S.iconBtn} onClick={() => openNotify(d)} aria-label="Send notification"><Bell size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => openPushCall(d)} aria-label="Push call"><PhoneCall size={15} /></button>
                       <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
                       <button style={S.iconBtn} onClick={() => resetUnlockCode(d)} aria-label="Reset unlock code"><RefreshCw size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
@@ -809,6 +831,36 @@ function Devices() {
               {sending ? "Sending…" : "Send notification"}
             </button>
             <button style={S.secondaryBtn} onClick={() => setNotifyDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {callDraft && (
+        <Drawer title={`Push call · ${callDraft.device.customers?.name || callDraft.device.device_model}`} onClose={() => setCallDraft(null)}>
+          <p style={{ fontSize: 12.5, color: "#6B7280", margin: "-8px 0 20px", lineHeight: 1.6 }}>
+            Shows a simulated incoming call on the phone. On Answer, the message below is spoken aloud via on-device text-to-speech — not a real phone call.
+          </p>
+          <Field label="Caller number to display" error={error === "Enter a caller number." ? error : undefined}>
+            <input
+              style={S.input}
+              value={callDraft.caller_number}
+              onChange={(e) => setCallDraft({ ...callDraft, caller_number: e.target.value })}
+              placeholder="021-1122334"
+            />
+          </Field>
+          <Field label="Message to speak" error={error === "Enter a message to speak." ? error : undefined}>
+            <textarea
+              style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
+              value={callDraft.message}
+              onChange={(e) => setCallDraft({ ...callDraft, message: e.target.value })}
+              placeholder="e.g. This is a reminder from Karachi Electronics. Your installment payment is overdue. Please visit or call the store to clear your due amount."
+            />
+          </Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={{ ...S.primaryBtn, opacity: sending ? 0.7 : 1 }} onClick={sendPushCall} disabled={sending}>
+              {sending ? "Sending…" : "Push call"}
+            </button>
+            <button style={S.secondaryBtn} onClick={() => setCallDraft(null)}>Cancel</button>
           </div>
         </Drawer>
       )}
