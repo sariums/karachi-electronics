@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
-  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall,
+  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -627,6 +627,11 @@ function Devices() {
   const [codeDialog, setCodeDialog] = useState(null);
   const [appsDraft, setAppsDraft] = useState(null);
   const [callDraft, setCallDraft] = useState(null);
+  const [audioCall, setAudioCall] = useState(null); // { device, status: 'connecting' | 'ringing' | 'connected' | 'failed', errorMsg }
+  const pcRef = useRef(null);
+  const channelRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteAudioRef = useRef(null);
   const [error, setError] = useState("");
 
   useEffect(() => { load(); }, []);
@@ -637,6 +642,14 @@ function Devices() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "device_events" }, () => load())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (pcRef.current) pcRef.current.close();
+      if (localStreamRef.current) localStreamRef.current.getTracks().forEach((t) => t.stop());
+      if (channelRef.current) supabase.removeChannel(channelRef.current);
+    };
   }, []);
 
   async function load() {
@@ -743,6 +756,86 @@ function Devices() {
     load();
   }
 
+  function endAudioCall() {
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+    if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t) => t.stop()); localStreamRef.current = null; }
+    if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
+    setAudioCall(null);
+  }
+
+  async function startAudioCall(device) {
+    setAudioCall({ device, status: "connecting" });
+
+    let localStream;
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      setAudioCall({ device, status: "failed", errorMsg: "Microphone access denied or unavailable." });
+      return;
+    }
+    localStreamRef.current = localStream;
+
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    pcRef.current = pc;
+    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+
+    pc.ontrack = (event) => {
+      if (remoteAudioRef.current) remoteAudioRef.current.srcObject = event.streams[0];
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") {
+        setAudioCall((prev) => (prev ? { ...prev, status: "connected" } : prev));
+      } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+        setAudioCall((prev) => (prev ? { ...prev, status: "failed", errorMsg: "Call disconnected." } : prev));
+      }
+    };
+
+    const sessionId = crypto.randomUUID();
+    const channel = supabase.channel(`call:${sessionId}`, { config: { broadcast: { self: false } } });
+    channelRef.current = channel;
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        channel.send({
+          type: "broadcast",
+          event: "ice-admin",
+          payload: {
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            candidate: event.candidate.candidate,
+          },
+        });
+      }
+    };
+
+    channel
+      .on("broadcast", { event: "ready" }, async () => {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        channel.send({ type: "broadcast", event: "offer", payload: { sdp: offer.sdp } });
+        setAudioCall((prev) => (prev ? { ...prev, status: "ringing" } : prev));
+      })
+      .on("broadcast", { event: "answer" }, async ({ payload }) => {
+        await pc.setRemoteDescription({ type: "answer", sdp: payload.sdp });
+      })
+      .on("broadcast", { event: "ice-phone" }, async ({ payload }) => {
+        try {
+          await pc.addIceCandidate({ sdpMid: payload.sdpMid, sdpMLineIndex: payload.sdpMLineIndex, candidate: payload.candidate });
+        } catch (e) {}
+      })
+      .subscribe();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({
+      device_id: device.id,
+      command: "AUDIO_CALL",
+      call_session_id: sessionId,
+      issued_by: user?.email || "admin",
+    });
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+  }
+
   function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model, imei: d.imei || "" }); setError(""); }
 
   async function saveEdit() {
@@ -801,6 +894,7 @@ function Devices() {
                       )}
                       <button style={S.iconBtn} onClick={() => openNotify(d)} aria-label="Send notification"><Bell size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openPushCall(d)} aria-label="Push call"><PhoneCall size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => startAudioCall(d)} aria-label="Audio call"><Mic size={15} /></button>
                       <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
                       <button style={S.iconBtn} onClick={() => resetUnlockCode(d)} aria-label="Reset unlock code"><RefreshCw size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
@@ -863,6 +957,26 @@ function Devices() {
             <button style={S.secondaryBtn} onClick={() => setCallDraft(null)}>Cancel</button>
           </div>
         </Drawer>
+      )}
+
+      {audioCall && (
+        <div style={S.overlay}>
+          <div style={S.confirmCard}>
+            <h3 className="serif" style={{ fontSize: 18, color: "#14161C", margin: "0 0 4px" }}>
+              Audio call · {audioCall.device.customers?.name || audioCall.device.device_model}
+            </h3>
+            <p style={{ fontSize: 13.5, color: "#6B7280", margin: "0 0 20px" }}>
+              {audioCall.status === "connecting" && "Ringing the phone…"}
+              {audioCall.status === "ringing" && "Waiting for the phone to pick up…"}
+              {audioCall.status === "connected" && "Connected — live call in progress."}
+              {audioCall.status === "failed" && (audioCall.errorMsg || "Call failed.")}
+            </p>
+            <button style={S.dangerBtn} onClick={endAudioCall}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><PhoneOff size={14} /> End call</span>
+            </button>
+          </div>
+          <audio ref={remoteAudioRef} autoPlay />
+        </div>
       )}
 
       {historyDraft && (
