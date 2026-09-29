@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
-  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog,
+  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -58,6 +58,7 @@ export default function App() {
         {tab === "devices" && <Devices />}
         {tab === "payments" && <Payments />}
         {tab === "numbers" && <WhitelistedNumbers />}
+        {tab === "roles" && <RolesList />}
         {tab === "accounts" && <AccountManagement />}
       </main>
     </div>
@@ -149,6 +150,7 @@ function Sidebar({ tab, setTab, email }) {
     { id: "devices", label: "Devices", icon: Smartphone },
     { id: "payments", label: "Payments", icon: Wallet },
     { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
+    { id: "roles", label: "Role List", icon: ShieldCheck },
     { id: "accounts", label: "Account Management", icon: UserCog },
   ];
   return (
@@ -1311,10 +1313,104 @@ function WhitelistedNumbers() {
   );
 }
 
+/* ---------------- ROLES ---------------- */
+
+function RolesList() {
+  const [roles, setRoles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [draft, setDraft] = useState({ id: null, name: "" });
+  const [errors, setErrors] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase.from("roles").select("*").order("created_at", { ascending: true });
+    setRoles(data || []);
+    setLoading(false);
+  }
+
+  function openAdd() { setDraft({ id: null, name: "" }); setErrors({}); setDrawerOpen(true); }
+  function openEdit(r) { setDraft({ id: r.id, name: r.name }); setErrors({}); setDrawerOpen(true); }
+
+  async function save() {
+    if (!draft.name.trim()) { setErrors({ name: "Enter a role name." }); return; }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (draft.id == null) {
+      await supabase.from("roles").insert({ name: draft.name.trim(), created_by: user?.email || "admin" });
+    } else {
+      await supabase.from("roles").update({ name: draft.name.trim() }).eq("id", draft.id);
+    }
+    setDrawerOpen(false);
+    load();
+  }
+
+  async function performDelete(id) {
+    await supabase.from("roles").delete().eq("id", id);
+    setConfirmDelete(null);
+    load();
+  }
+
+  return (
+    <div>
+      <PageHeader eyebrow="Settings" title="Role List" count={roles.length}>
+        <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Create role</button>
+      </PageHeader>
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
+        Permissions per role aren't wired up yet — roles exist here so they can be assigned when inviting staff in Account Management.
+      </p>
+
+      <div style={S.tableCard}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Role", "Permissions", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={3} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && roles.length === 0 && <tr><td colSpan={3} style={S.emptyCell}>No roles yet.</td></tr>}
+            {roles.map((r) => (
+              <tr key={r.id} style={S.tr}>
+                <td style={S.td}>{r.name}</td>
+                <td style={S.td}>
+                  <span style={{ ...S.badge, background: "#EEF0F4", color: "#6B7280" }}>{(r.permissions || []).length} permissions</span>
+                </td>
+                <td style={{ ...S.td, textAlign: "right" }}>
+                  <button style={S.iconBtn} onClick={() => openEdit(r)} aria-label="Edit"><Pencil size={15} /></button>
+                  <button style={{ ...S.iconBtn, marginLeft: 4 }} onClick={() => setConfirmDelete(r)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {drawerOpen && (
+        <Drawer title={draft.id == null ? "Create role" : "Edit role"} onClose={() => setDrawerOpen(false)}>
+          <Field label="Role name" error={errors.name}><input style={S.input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Branch Manager" /></Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 28 }}>
+            <button style={S.primaryBtn} onClick={save}>{draft.id == null ? "Create role" : "Save changes"}</button>
+            <button style={S.secondaryBtn} onClick={() => setDrawerOpen(false)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Remove role"
+          message={`${confirmDelete.name} will be removed. Staff already invited with this role keep their current access.`}
+          onConfirm={() => performDelete(confirmDelete.id)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 /* ---------------- ACCOUNT MANAGEMENT ---------------- */
 
 function AccountManagement() {
   const [users, setUsers] = useState([]);
+  const [roleOptions, setRoleOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState({ name: "", email: "", role: "" });
@@ -1322,7 +1418,7 @@ function AccountManagement() {
   const [inviting, setInviting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(null);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadRoleOptions(); }, []);
 
   async function load() {
     setLoading(true);
@@ -1331,7 +1427,12 @@ function AccountManagement() {
     setLoading(false);
   }
 
-  function openInvite() { setDraft({ name: "", email: "", role: "" }); setErrors({}); setDrawerOpen(true); }
+  async function loadRoleOptions() {
+    const { data } = await supabase.from("roles").select("name").order("name", { ascending: true });
+    setRoleOptions((data || []).map((r) => r.name));
+  }
+
+  function openInvite() { setDraft({ name: "", email: "", role: roleOptions[0] || "" }); setErrors({}); setDrawerOpen(true); }
 
   async function sendInvite() {
     const e = {};
@@ -1398,7 +1499,15 @@ function AccountManagement() {
         <Drawer title="Invite user" onClose={() => setDrawerOpen(false)}>
           <Field label="Name" error={errors.name}><input style={S.input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Jordan Lee" /></Field>
           <Field label="Email" error={errors.email}><input style={S.input} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="staff@karachielectronics.pk" /></Field>
-          <Field label="Role" error={errors.role}><input style={S.input} value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} placeholder="e.g. Admin, Branch Manager" /></Field>
+          <Field label="Role" error={errors.role}>
+            {roleOptions.length > 0 ? (
+              <select style={{ ...S.select, width: "100%" }} value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })}>
+                {roleOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            ) : (
+              <p style={{ fontSize: 12.5, color: "#9AA1AE", margin: 0 }}>No roles created yet — add one in Role List first.</p>
+            )}
+          </Field>
           {errors.form && <p style={{ fontSize: 12, color: "#D6414C", margin: "0 0 12px" }}>{errors.form}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={{ ...S.primaryBtn, opacity: inviting ? 0.7 : 1 }} onClick={sendInvite} disabled={inviting}>
