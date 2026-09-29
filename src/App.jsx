@@ -3,6 +3,7 @@ import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
+  ChevronDown, Settings, HelpCircle,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -49,19 +50,45 @@ export default function App() {
   if (!session) return <LoginScreen />;
 
   return (
-    <div style={S.app}>
+    <div style={S.appShell}>
       <GlobalStyle />
-      <Sidebar tab={tab} setTab={setTab} email={session.user.email} />
-      <main style={S.main}>
-        {tab === "dashboard" && <Dashboard />}
-        {tab === "customers" && <Customers />}
-        {tab === "devices" && <Devices />}
-        {tab === "payments" && <Payments />}
-        {tab === "numbers" && <WhitelistedNumbers />}
-        {tab === "roles" && <RolesList />}
-        {tab === "accounts" && <AccountManagement />}
-      </main>
+      <TopBar email={session.user.email} />
+      <div style={S.appBody}>
+        <Sidebar tab={tab} setTab={setTab} />
+        <main style={S.main}>
+          {tab === "dashboard" && <Dashboard />}
+          {tab === "customers" && <Customers />}
+          {tab === "devices" && <Devices />}
+          {tab === "payments" && <Payments />}
+          {tab === "numbers" && <WhitelistedNumbers />}
+          {tab === "roles" && <RolesList />}
+          {tab === "accounts" && <AccountManagement />}
+        </main>
+      </div>
     </div>
+  );
+}
+
+function TopBar({ email }) {
+  return (
+    <header style={S.topbar}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={S.logoMark}>N</div>
+        <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>Northline Portal</span>
+        <span style={{ fontSize: 13, color: "#9AA1AE", marginLeft: 4 }}>Hi, welcome back</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#6B7280", fontSize: 13 }}>
+          <HelpCircle size={15} />
+          Help
+        </div>
+        <div style={{ width: 1, height: 20, background: "#E6E8EC" }} />
+        <span style={{ fontSize: 13, color: "#6B7280" }}>{email}</span>
+        <button style={S.logoutBtn} onClick={() => supabase.auth.signOut()}>
+          <LogOut size={14} /> Log out
+        </button>
+      </div>
+    </header>
   );
 }
 
@@ -143,24 +170,63 @@ function LoginScreen() {
 
 /* ---------------- SIDEBAR ---------------- */
 
-function Sidebar({ tab, setTab, email }) {
-  const items = [
+function Sidebar({ tab, setTab }) {
+  const nav = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "customers", label: "Customers", icon: Users },
-    { id: "devices", label: "Devices", icon: Smartphone },
+    {
+      group: "Customer Management", icon: Users, items: [
+        { id: "customers", label: "Customers", icon: Users },
+      ],
+    },
+    {
+      group: "Device Management", icon: Smartphone, items: [
+        { id: "devices", label: "Devices", icon: Smartphone },
+        { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
+      ],
+    },
     { id: "payments", label: "Payments", icon: Wallet },
-    { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
-    { id: "roles", label: "Role List", icon: ShieldCheck },
-    { id: "accounts", label: "Account Management", icon: UserCog },
+    {
+      group: "Settings Management", icon: Settings, items: [
+        { id: "roles", label: "Role List", icon: ShieldCheck },
+        { id: "accounts", label: "Account Management", icon: UserCog },
+      ],
+    },
   ];
+
+  const activeGroup = nav.find((it) => it.items?.some((sub) => sub.id === tab))?.group;
+  const [openGroup, setOpenGroup] = useState(activeGroup || "Device Management");
+
   return (
     <aside style={S.sidebar}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 40 }}>
-        <div style={S.logoMark}>N</div>
-        <span className="serif" style={{ fontSize: 18, color: "#14161C" }}>Northline</span>
-      </div>
-      <nav style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {items.map((it) => {
+      <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {nav.map((it) => {
+          if (it.items) {
+            const isOpen = openGroup === it.group;
+            const GroupIcon = it.icon;
+            return (
+              <div key={it.group}>
+                <div style={S.navGroupHeader} onClick={() => setOpenGroup(isOpen ? null : it.group)}>
+                  <GroupIcon size={15} />
+                  <span style={{ flex: 1 }}>{it.group}</span>
+                  <ChevronDown size={14} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
+                </div>
+                {isOpen && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 4 }}>
+                    {it.items.map((sub) => {
+                      const SubIcon = sub.icon;
+                      const active = tab === sub.id;
+                      return (
+                        <div key={sub.id} style={active ? S.navSubItemActive : S.navSubItem} onClick={() => setTab(sub.id)}>
+                          <SubIcon size={14} />
+                          <span>{sub.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          }
           const Icon = it.icon;
           const active = tab === it.id;
           return (
@@ -171,13 +237,6 @@ function Sidebar({ tab, setTab, email }) {
           );
         })}
       </nav>
-      <div style={{ marginTop: "auto", paddingTop: 24, borderTop: "1px solid #E6E8EC" }}>
-        <p style={{ fontSize: 12, color: "#9AA1AE", margin: 0 }}>Signed in as</p>
-        <p style={{ fontSize: 13, color: "#374151", margin: "4px 0 0", wordBreak: "break-all" }}>{email}</p>
-        <button style={S.logoutBtn} onClick={() => supabase.auth.signOut()}>
-          <LogOut size={14} /> Log out
-        </button>
-      </div>
     </aside>
   );
 }
@@ -1658,13 +1717,18 @@ const S = {
   loginCard: { width: 380, background: "#FFFFFF", border: "1px solid #E6E8EC", borderRadius: 14, padding: "32px 28px" },
   iconInputWrap: { display: "flex", alignItems: "center", gap: 8, background: "#FFFFFF", border: "1px solid #D8DCE3", borderRadius: 8, padding: "9px 12px" },
   iconInput: { background: "transparent", border: "none", color: "#14161C", fontSize: 13.5, width: "100%", outline: "none" },
-  logoutBtn: { display: "flex", alignItems: "center", gap: 6, marginTop: 12, background: "transparent", border: "1px solid #D8DCE3", borderRadius: 7, padding: "6px 10px", fontSize: 12.5, color: "#6B7280" },
-  app: { display: "flex", minHeight: "100vh", background: "#F5F6F8", color: "#14161C" },
-  sidebar: { width: 208, flexShrink: 0, background: "#FFFFFF", borderRight: "1px solid #E6E8EC", padding: "24px 18px", display: "flex", flexDirection: "column" },
-  logoMark: { width: 28, height: 28, borderRadius: 7, background: "#F2A93C", color: "#2C1E06", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 14 },
+  logoutBtn: { display: "flex", alignItems: "center", gap: 6, background: "transparent", border: "1px solid #D8DCE3", borderRadius: 7, padding: "6px 10px", fontSize: 12.5, color: "#6B7280" },
+  appShell: { display: "flex", flexDirection: "column", minHeight: "100vh", background: "#F5F6F8", color: "#14161C" },
+  topbar: { display: "flex", alignItems: "center", justifyContent: "space-between", height: 60, flexShrink: 0, background: "#FFFFFF", borderBottom: "1px solid #E6E8EC", padding: "0 24px" },
+  appBody: { display: "flex", flex: 1, minHeight: 0 },
+  sidebar: { width: 224, flexShrink: 0, background: "#FFFFFF", borderRight: "1px solid #E6E8EC", padding: "20px 14px" },
+  logoMark: { width: 28, height: 28, borderRadius: 7, background: "#F2A93C", color: "#2C1E06", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Fraunces', serif", fontWeight: 600, fontSize: 14, flexShrink: 0 },
   navItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 13.5, color: "#6B7280", cursor: "pointer" },
   navItemActive: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 13.5, color: "#14161C", background: "#FBF1E1", borderLeft: "2px solid #F2A93C", cursor: "pointer" },
-  main: { flex: 1, padding: "36px 44px", maxWidth: 1080 },
+  navGroupHeader: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, fontSize: 12, fontWeight: 600, letterSpacing: 0.4, textTransform: "uppercase", color: "#6B7280", cursor: "pointer" },
+  navSubItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 10px 8px 28px", borderRadius: 7, fontSize: 13, color: "#6B7280", cursor: "pointer" },
+  navSubItemActive: { display: "flex", alignItems: "center", gap: 10, padding: "8px 10px 8px 28px", borderRadius: 7, fontSize: 13, color: "#14161C", background: "#FBF1E1", borderLeft: "2px solid #F2A93C", cursor: "pointer" },
+  main: { flex: 1, padding: "36px 44px", maxWidth: 1080, overflowY: "auto" },
   eyebrow: { fontSize: 12, letterSpacing: 1.2, textTransform: "uppercase", color: "#9AA1AE", margin: "0 0 6px" },
   h1: { fontSize: 30, fontWeight: 500, margin: 0, color: "#14161C" },
   primaryBtn: { display: "flex", alignItems: "center", gap: 7, background: "#F2A93C", color: "#2C1E06", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600 },
