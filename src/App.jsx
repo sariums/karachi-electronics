@@ -3,7 +3,7 @@ import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle, Sliders, Send,
+  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -1381,32 +1381,186 @@ function WhitelistedNumbers() {
 /* ---------------- SEND MESSAGE (UI only, wiring later) ---------------- */
 
 function SendMessagePage() {
-  const [recipient, setRecipient] = useState("");
-  const [message, setMessage] = useState("");
+  const [activeTab, setActiveTab] = useState("popups");
+  const [sendType, setSendType] = useState("single");
+  const [deviceTag, setDeviceTag] = useState("");
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [callerNumber, setCallerNumber] = useState("");
+
+  const tabs = [
+    { id: "popups", label: "Pop-ups" },
+    { id: "push", label: "Push" },
+    { id: "call", label: "Simulated incoming call" },
+  ];
+
+  const tabCopy = {
+    popups: { title: "Pop-ups", desc: "The pop-up window will appear in the phone. You can set Title and content." },
+    push: { title: "Push", desc: "Sending off notification messages." },
+    call: { title: "Simulated incoming call", desc: "A simulated incoming call screen will appear on the user's phone. The user will hear a recording after clicking accept." },
+  };
 
   return (
     <div>
       <PageHeader eyebrow="Custom Management" title="Send Message" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Send a one-off message to a customer's device. Layout only for now — sending isn't wired up yet.
+        Layout only for now — sending isn't wired up yet.
       </p>
 
-      <div style={{ ...S.tableCard, padding: "24px 26px", maxWidth: 480 }}>
-        <Field label="Device / Customer">
-          <select style={{ ...S.select, width: "100%" }} value={recipient} onChange={(e) => setRecipient(e.target.value)}>
-            <option value="">Select a device…</option>
-          </select>
-        </Field>
-        <Field label="Message">
-          <textarea
-            style={{ ...S.input, minHeight: 120, resize: "vertical", fontFamily: "inherit" }}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="Type the message to send…"
-          />
-        </Field>
-        <button style={S.primaryBtn}><Send size={15} /> Send message</button>
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ ...S.tableCard, padding: 0, flex: "1 1 480px", minWidth: 320 }}>
+          <div style={{ display: "flex", borderBottom: "1px solid #E6E8EC" }}>
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                style={{
+                  flex: 1, padding: "12px 10px", fontSize: 13, fontWeight: 600, background: "transparent",
+                  border: "none", borderBottom: activeTab === t.id ? "2px solid #F2A93C" : "2px solid transparent",
+                  color: activeTab === t.id ? "#14161C" : "#9AA1AE",
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ padding: 24 }}>
+            <h3 className="serif" style={{ fontSize: 17, color: "#14161C", margin: "0 0 6px" }}>{tabCopy[activeTab].title}</h3>
+            <p style={{ fontSize: 12.5, color: "#6B7280", margin: "0 0 20px", lineHeight: 1.6 }}>{tabCopy[activeTab].desc}</p>
+
+            {activeTab !== "call" ? (
+              <>
+                <Field label="Choose type">
+                  <div style={{ display: "flex", gap: 20 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
+                      <input type="radio" checked={sendType === "single"} onChange={() => setSendType("single")} /> Single unit
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
+                      <input type="radio" checked={sendType === "bulk"} onChange={() => setSendType("bulk")} /> Bulk units
+                    </label>
+                  </div>
+                </Field>
+                <Field label="Device Tag">
+                  <input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please input Devicetag or original enrolled IMEI" />
+                </Field>
+                <Field label="Message Template">
+                  <button type="button" style={{ ...S.iconBtn, borderRadius: "50%" }} aria-label="Add template"><Plus size={15} /></button>
+                </Field>
+                <Field label="Title">
+                  <input style={S.input} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" />
+                </Field>
+                <Field label="Content">
+                  <div style={{ position: "relative" }}>
+                    <textarea
+                      style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit" }}
+                      value={content}
+                      maxLength={500}
+                      onChange={(e) => setContent(e.target.value)}
+                      placeholder="Content"
+                    />
+                    <span style={{ position: "absolute", right: 10, bottom: 8, fontSize: 11, color: "#9AA1AE" }}>{content.length}/500</span>
+                  </div>
+                </Field>
+              </>
+            ) : (
+              <>
+                <div style={{ ...S.tableCard, marginBottom: 20 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr>{["", "Number", "Audio Recording Name", "Operation"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {[0, 1, 2, 3].map((n) => (
+                        <tr key={n} style={S.tr}>
+                          <td style={S.td}><input type="checkbox" /></td>
+                          <td style={S.td} className="mono">{n}</td>
+                          <td style={S.td}>{n === 0 ? "Recording.amr" : ""}</td>
+                          <td style={{ ...S.td, display: "flex", gap: 8 }}>
+                            <button type="button" style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                              <Copy size={12} /> Copy URL
+                            </button>
+                            <button type="button" style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                              <Upload size={12} /> Upload
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "-14px 0 20px" }}>AMR format only. Files must not exceed 100kb.</p>
+
+                <Field label="Choose number">
+                  <input style={S.input} value={callerNumber} onChange={(e) => setCallerNumber(e.target.value)} placeholder="Please enter the displayed number" />
+                </Field>
+                <Field label="Device Tag">
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <button type="button" style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Upload size={14} /> Upload
+                    </button>
+                    <a href="#" onClick={(e) => e.preventDefault()} style={{ fontSize: 12.5, color: "#F2A93C" }}>Template download</a>
+                  </div>
+                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>Only .xls files can be uploaded. Maximum 2,000 devices per upload.</p>
+                </Field>
+              </>
+            )}
+
+            <button style={{ ...S.primaryBtn, marginTop: 8 }}><Send size={15} /> Submit</button>
+          </div>
+        </div>
+
+        <PhonePreview variant={activeTab} title={title} content={content} number={callerNumber} />
       </div>
+    </div>
+  );
+}
+
+function PhonePreview({ variant, title, content, number }) {
+  const timeLabel = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return (
+    <div style={{ flex: "0 0 220px" }}>
+      <div style={{ width: 220, height: 460, borderRadius: 30, background: "#0B0E14", border: "8px solid #14161C", position: "relative", overflow: "hidden", boxShadow: "0 16px 32px rgba(20,22,28,0.22)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 16px 0", color: "#EDEEF2", fontSize: 11, fontWeight: 500 }}>
+          <span>{timeLabel}</span>
+          <span>●●●</span>
+        </div>
+
+        {variant === "popups" && (
+          <div style={{ position: "absolute", top: "36%", left: 16, right: 16, background: "#FFFFFF", borderRadius: 14, padding: 18, textAlign: "center", boxShadow: "0 8px 20px rgba(0,0,0,0.3)" }}>
+            <p style={{ fontWeight: 700, fontSize: 13.5, margin: "0 0 6px", color: "#14161C" }}>{title || "Title"}</p>
+            <p style={{ fontSize: 12, color: "#6B7280", margin: "0 0 16px", lineHeight: 1.5 }}>{content || "Content"}</p>
+            <button style={{ ...S.primaryBtn, width: "100%", justifyContent: "center" }}>Get feedback</button>
+          </div>
+        )}
+
+        {variant === "push" && (
+          <div style={{ margin: "10px 10px 0", background: "rgba(245,246,248,0.97)", borderRadius: 12, padding: 12 }}>
+            <p style={{ fontSize: 10.5, color: "#6B7280", margin: "0 0 3px", fontWeight: 600 }}>SecurityPlugin · now</p>
+            <p style={{ fontSize: 12.5, fontWeight: 600, margin: 0, color: "#14161C" }}>{title || "Title"}</p>
+            <p style={{ fontSize: 11.5, color: "#374151", margin: "2px 0 0" }}>{content || "Content"}</p>
+          </div>
+        )}
+
+        {variant === "call" && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", height: "86%", padding: "28px 0 24px" }}>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#2A2F3A", margin: "0 auto 18px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <PhoneIncoming size={26} color="#9AA1AE" />
+              </div>
+              <p style={{ color: "#FFFFFF", fontSize: 17, fontWeight: 600, margin: 0 }}>{number || "112233445566"}</p>
+              <p style={{ color: "#9AA1AE", fontSize: 11.5, margin: "4px 0 0" }}>Incoming call</p>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", width: "68%" }}>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#D6414C", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <PhoneOff size={18} color="#fff" />
+              </div>
+              <div style={{ width: 48, height: 48, borderRadius: "50%", background: "#0E9488", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <PhoneCall size={18} color="#fff" />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <p style={{ textAlign: "center", fontSize: 11.5, color: "#9AA1AE", marginTop: 10 }}>Live preview</p>
     </div>
   );
 }
