@@ -3,7 +3,7 @@ import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle,
+  ChevronDown, Settings, HelpCircle, Sliders, Send,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -59,6 +59,7 @@ export default function App() {
           {tab === "dashboard" && <Dashboard />}
           {tab === "customers" && <Customers />}
           {tab === "devices" && <Devices />}
+          {tab === "sendMessage" && <SendMessagePage />}
           {tab === "payments" && <Payments />}
           {tab === "numbers" && <WhitelistedNumbers />}
           {tab === "roles" && <RolesList />}
@@ -182,6 +183,11 @@ function Sidebar({ tab, setTab }) {
       group: "Device Management", icon: Smartphone, items: [
         { id: "devices", label: "Devices", icon: Smartphone },
         { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
+      ],
+    },
+    {
+      group: "Custom Management", icon: Sliders, items: [
+        { id: "sendMessage", label: "Send Message", icon: Send },
       ],
     },
     { id: "payments", label: "Payments", icon: Wallet },
@@ -1368,6 +1374,39 @@ function WhitelistedNumbers() {
           onCancel={() => setConfirmDelete(null)}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------------- SEND MESSAGE (UI only, wiring later) ---------------- */
+
+function SendMessagePage() {
+  const [recipient, setRecipient] = useState("");
+  const [message, setMessage] = useState("");
+
+  return (
+    <div>
+      <PageHeader eyebrow="Custom Management" title="Send Message" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
+        Send a one-off message to a customer's device. Layout only for now — sending isn't wired up yet.
+      </p>
+
+      <div style={{ ...S.tableCard, padding: "24px 26px", maxWidth: 480 }}>
+        <Field label="Device / Customer">
+          <select style={{ ...S.select, width: "100%" }} value={recipient} onChange={(e) => setRecipient(e.target.value)}>
+            <option value="">Select a device…</option>
+          </select>
+        </Field>
+        <Field label="Message">
+          <textarea
+            style={{ ...S.input, minHeight: 120, resize: "vertical", fontFamily: "inherit" }}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="Type the message to send…"
+          />
+        </Field>
+        <button style={S.primaryBtn}><Send size={15} /> Send message</button>
+      </div>
     </div>
   );
 }
