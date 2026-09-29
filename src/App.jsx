@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
-  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff,
+  History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog,
 } from "lucide-react";
 import { supabase } from "./supabaseClient";
 
@@ -58,6 +58,7 @@ export default function App() {
         {tab === "devices" && <Devices />}
         {tab === "payments" && <Payments />}
         {tab === "numbers" && <WhitelistedNumbers />}
+        {tab === "accounts" && <AccountManagement />}
       </main>
     </div>
   );
@@ -148,6 +149,7 @@ function Sidebar({ tab, setTab, email }) {
     { id: "devices", label: "Devices", icon: Smartphone },
     { id: "payments", label: "Payments", icon: Wallet },
     { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
+    { id: "accounts", label: "Account Management", icon: UserCog },
   ];
   return (
     <aside style={S.sidebar}>
@@ -183,9 +185,10 @@ function Sidebar({ tab, setTab, email }) {
 function Dashboard() {
   const [stats, setStats] = useState({ customers: 0, devices: 0, locked: 0, overdue: 0 });
   const [overdueList, setOverdueList] = useState([]);
+  const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); loadChartData(); }, []);
 
   async function load() {
     setLoading(true);
@@ -215,6 +218,36 @@ function Dashboard() {
     setLoading(false);
   }
 
+  async function loadChartData() {
+    const days = 30;
+    const start = new Date();
+    start.setDate(start.getDate() - (days - 1));
+    const startISO = start.toISOString().slice(0, 10);
+
+    const [{ data: devs }, { data: events }] = await Promise.all([
+      supabase.from("devices").select("provisioned_at").gte("provisioned_at", startISO),
+      supabase.from("device_events").select("event_type, occurred_at").gte("occurred_at", startISO),
+    ]);
+
+    const buckets = {};
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      buckets[d.toISOString().slice(0, 10)] = { enrolled: 0, locked: 0, unlocked: 0 };
+    }
+    (devs || []).forEach((d) => {
+      const key = (d.provisioned_at || "").slice(0, 10);
+      if (buckets[key]) buckets[key].enrolled++;
+    });
+    (events || []).forEach((e) => {
+      const key = (e.occurred_at || "").slice(0, 10);
+      if (!buckets[key]) return;
+      if (e.event_type === "LOCK") buckets[key].locked++;
+      else if (e.event_type === "UNLOCK") buckets[key].unlocked++;
+    });
+    setChartData(Object.keys(buckets).sort().map((key) => ({ date: key, ...buckets[key] })));
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Overview" title="Dashboard" />
@@ -225,7 +258,10 @@ function Dashboard() {
         <StatCard label="Overdue payments" value={stats.overdue} accent="#F2A93C" />
       </div>
 
-      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Overdue this period</h3>
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Activity — last 30 days</h3>
+      <GrowthChart data={chartData} />
+
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "28px 0 12px" }}>Overdue this period</h3>
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>{["Customer", "Device", "Due date", "Amount"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
@@ -1275,6 +1311,116 @@ function WhitelistedNumbers() {
   );
 }
 
+/* ---------------- ACCOUNT MANAGEMENT ---------------- */
+
+function AccountManagement() {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [draft, setDraft] = useState({ name: "", email: "", role: "" });
+  const [errors, setErrors] = useState({});
+  const [inviting, setInviting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase.from("admin_users").select("*").order("invited_at", { ascending: false });
+    setUsers(data || []);
+    setLoading(false);
+  }
+
+  function openInvite() { setDraft({ name: "", email: "", role: "" }); setErrors({}); setDrawerOpen(true); }
+
+  async function sendInvite() {
+    const e = {};
+    if (!draft.name.trim()) e.name = "Enter a name.";
+    if (!draft.email.trim()) e.email = "Enter an email.";
+    if (!draft.role.trim()) e.role = "Enter a role.";
+    setErrors(e);
+    if (Object.keys(e).length) return;
+
+    setInviting(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { data, error } = await supabase.functions.invoke("invite-admin-user", {
+      body: { name: draft.name.trim(), email: draft.email.trim(), role: draft.role.trim(), invited_by: user?.email || "admin" },
+    });
+    setInviting(false);
+    if (error || !data?.success) {
+      setErrors({ form: data?.reason || "Could not send invite. Try again." });
+      return;
+    }
+    setDrawerOpen(false);
+    load();
+  }
+
+  async function performDelete(u) {
+    const { data } = await supabase.functions.invoke("remove-admin-user", { body: { id: u.id } }).catch(() => ({ data: null }));
+    if (!data?.success) return;
+    setConfirmDelete(null);
+    load();
+  }
+
+  return (
+    <div>
+      <PageHeader eyebrow="Settings" title="Account Management" count={users.length}>
+        <button style={S.primaryBtn} onClick={openInvite}><Plus size={16} /> Invite user</button>
+      </PageHeader>
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 520 }}>
+        Invited staff get an email with a link to set their password and sign in to this admin panel.
+      </p>
+
+      <div style={S.tableCard}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Name", "Email", "Role", "Status", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && users.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No accounts yet.</td></tr>}
+            {users.map((u) => (
+              <tr key={u.id} style={S.tr}>
+                <td style={S.td}>{u.name}</td>
+                <td style={S.td} className="mono">{u.email}</td>
+                <td style={S.td}>{u.role}</td>
+                <td style={S.td}>
+                  <span style={{ ...S.badge, background: "#E5F8F2", color: "#0E9488" }}>{u.status || "Invited"}</span>
+                </td>
+                <td style={{ ...S.td, textAlign: "right" }}>
+                  <button style={S.iconBtn} onClick={() => setConfirmDelete(u)} aria-label="Remove"><Trash2 size={15} color="#D6414C" /></button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {drawerOpen && (
+        <Drawer title="Invite user" onClose={() => setDrawerOpen(false)}>
+          <Field label="Name" error={errors.name}><input style={S.input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Jordan Lee" /></Field>
+          <Field label="Email" error={errors.email}><input style={S.input} value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="staff@karachielectronics.pk" /></Field>
+          <Field label="Role" error={errors.role}><input style={S.input} value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} placeholder="e.g. Admin, Branch Manager" /></Field>
+          {errors.form && <p style={{ fontSize: 12, color: "#D6414C", margin: "0 0 12px" }}>{errors.form}</p>}
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={{ ...S.primaryBtn, opacity: inviting ? 0.7 : 1 }} onClick={sendInvite} disabled={inviting}>
+              {inviting ? "Sending…" : "Send invite"}
+            </button>
+            <button style={S.secondaryBtn} onClick={() => setDrawerOpen(false)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Remove account"
+          message={`${confirmDelete.name} (${confirmDelete.email}) will lose access to this admin panel immediately. This can't be undone.`}
+          onConfirm={() => performDelete(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 /* ---------------- SHARED UI ---------------- */
 
 function PageHeader({ eyebrow, title, count, children }) {
@@ -1297,6 +1443,49 @@ function StatCard({ label, value, accent }) {
     <div style={S.statCard}>
       <p style={{ fontSize: 12, color: "#6B7280", margin: "0 0 6px" }}>{label}</p>
       <p className="serif" style={{ fontSize: 26, color: accent || "#14161C", margin: 0 }}>{value}</p>
+    </div>
+  );
+}
+
+function GrowthChart({ data }) {
+  if (!data.length) return null;
+  const width = 700, height = 200, padL = 10, padR = 10, padT = 10, padB = 24;
+  const innerW = width - padL - padR, innerH = height - padT - padB;
+  const maxVal = Math.max(1, ...data.flatMap((d) => [d.enrolled, d.locked, d.unlocked]));
+
+  const xFor = (i) => padL + (data.length === 1 ? 0 : (i / (data.length - 1)) * innerW);
+  const yFor = (v) => padT + innerH - (v / maxVal) * innerH;
+  const lineFor = (key) => data.map((d, i) => `${i === 0 ? "M" : "L"} ${xFor(i).toFixed(1)},${yFor(d[key]).toFixed(1)}`).join(" ");
+
+  const series = [
+    { key: "enrolled", label: "Enrolled", color: "#F2A93C" },
+    { key: "locked", label: "Locked", color: "#D6414C" },
+    { key: "unlocked", label: "Unlocked", color: "#0E9488" },
+  ];
+  const labelEvery = Math.max(1, Math.ceil(data.length / 6));
+
+  return (
+    <div style={{ ...S.tableCard, padding: "18px 20px 10px" }}>
+      <div style={{ display: "flex", gap: 16, marginBottom: 10 }}>
+        {series.map((s) => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#6B7280" }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, display: "inline-block" }} />
+            {s.label}
+          </div>
+        ))}
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {series.map((s) => (
+          <path key={s.key} d={lineFor(s.key)} fill="none" stroke={s.color} strokeWidth="2" />
+        ))}
+        {data.map((d, i) =>
+          i % labelEvery === 0 ? (
+            <text key={d.date} x={xFor(i)} y={height - 4} fontSize="9" fill="#9AA1AE" textAnchor="middle">
+              {d.date.slice(5)}
+            </text>
+          ) : null
+        )}
+      </svg>
     </div>
   );
 }
