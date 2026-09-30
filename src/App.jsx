@@ -1672,6 +1672,35 @@ function GeneralSettingsPage() {
     setOutgoingMsg("Saved.");
   }
 
+  const [appsEnabled, setAppsEnabled] = useState(false);
+  const [appsList, setAppsList] = useState("");
+  const [savingApps, setSavingApps] = useState(false);
+  const [appsMsg, setAppsMsg] = useState("");
+
+  useEffect(() => {
+    supabase.from("app_branding").select("whitelisted_apps_enabled, whitelisted_apps").eq("id", 1).maybeSingle()
+      .then(({ data }) => {
+        setAppsEnabled(!!data?.whitelisted_apps_enabled);
+        setAppsList(data?.whitelisted_apps || "");
+      });
+  }, []);
+
+  async function saveWhitelistedApps() {
+    const list = [...new Set(appsList.split(",").map((p) => p.trim()).filter(Boolean))];
+    setSavingApps(true);
+    setAppsMsg("");
+    const { error } = await supabase.from("app_branding").update({
+      whitelisted_apps_enabled: appsEnabled,
+      whitelisted_apps: list.join(","),
+    }).eq("id", 1);
+    setSavingApps(false);
+    if (error) setAppsMsg(error.message);
+    else {
+      setAppsList(list.join(", "));
+      setAppsMsg("Saved.");
+    }
+  }
+
   async function saveName() {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -1815,13 +1844,22 @@ function GeneralSettingsPage() {
         <SettingsCard
           title="Whitelisted Apps"
           description="List the package names of mobile apps that customers are allowed to use when their phone is locked."
-          toggle checked={t.whitelistedAppsOn} onToggle={setOne("whitelistedAppsOn")}
+          toggle checked={appsEnabled} onToggle={(val) => { setAppsEnabled(val); }}
         >
-          {t.whitelistedAppsOn && (
+          {appsEnabled && (
             <Field label="Whitelisted apps">
-              <textarea style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. com.whatsapp,com.google.android.dialer" />
+              <textarea
+                style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
+                placeholder="e.g. com.whatsapp,com.google.android.dialer"
+                value={appsList}
+                onChange={(e) => setAppsList(e.target.value)}
+              />
             </Field>
           )}
+          <button type="button" style={{ ...S.primaryBtn, opacity: savingApps ? 0.7 : 1 }} onClick={saveWhitelistedApps} disabled={savingApps}>
+            {savingApps ? "Saving…" : "Save"}
+          </button>
+          {appsMsg && <p style={{ fontSize: 11.5, color: appsMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "8px 0 0" }}>{appsMsg}</p>}
         </SettingsCard>
 
         <SettingsCard title="Disconnection Auto-lock" description="When the device stays offline beyond the set time limit, it will automatically trigger an offline screen lock, released once the customer reconnects.">
