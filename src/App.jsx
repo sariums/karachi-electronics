@@ -1943,15 +1943,6 @@ function GeneralSettingsPage() {
           {simWatermarkMsg && <p style={{ fontSize: 11.5, color: simWatermarkMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "8px 0 0" }}>{simWatermarkMsg}</p>}
         </SettingsCard>
 
-        <SettingsCard title="Your app" description="When customers tap the notification message or the locked app, they'll be taken to the app you configure here.">
-          <Field label="App package name"><input style={S.input} placeholder="e.g. com.karachielectronics.app" /></Field>
-          <Field label="Page name"><input style={S.input} placeholder="e.g. com.karachielectronics.app.MainActivity" /></Field>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
-            <span style={{ fontSize: 13, color: "#374151" }}>Anti-Uninstall Protection</span>
-            <ToggleSwitch checked={t.antiUninstall} onChange={setOne("antiUninstall")} />
-          </div>
-        </SettingsCard>
-
         <SettingsCard title="Message of every time device boot" description="Display a notification message every time the customer boots the device." toggle checked={t.everyBoot} onToggle={setOne("everyBoot")} />
         <SettingsCard title="Message of SIM swap" description="Display a pop-up message when the customer changes SIM." toggle checked={t.simSwap} onToggle={setOne("simSwap")} />
         <SettingsCard title="Message of SIM removed" description="Display a notification message when all SIMs are removed. This feature can prevent resale." toggle checked={t.simRemoved} onToggle={setOne("simRemoved")} />
