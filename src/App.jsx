@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useContext, createContext } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
@@ -32,12 +32,21 @@ function formatRelativeTime(iso) {
   return `${days}d ago`;
 }
 
+const BrandingContext = createContext({ name: "Northline", iconUrl: null, reload: () => {} });
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [tab, setTab] = useState("dashboard");
+  const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
+
+  async function loadBranding() {
+    const { data } = await supabase.from("app_branding").select("name, icon_url").eq("id", 1).maybeSingle();
+    if (data) setBranding({ name: data.name || "Northline", iconUrl: data.icon_url || null });
+  }
 
   useEffect(() => {
+    loadBranding();
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setAuthChecked(true);
@@ -47,36 +56,49 @@ export default function App() {
   }, []);
 
   if (!authChecked) return <div style={{ minHeight: "100vh", background: "#F5F6F8" }} />;
-  if (!session) return <LoginScreen />;
+
+  const brandingValue = { ...branding, reload: loadBranding };
+  if (!session) return <BrandingContext.Provider value={brandingValue}><LoginScreen /></BrandingContext.Provider>;
 
   return (
-    <div style={S.appShell}>
-      <GlobalStyle />
-      <TopBar email={session.user.email} />
-      <div style={S.appBody}>
-        <Sidebar tab={tab} setTab={setTab} />
-        <main style={S.main}>
-          {tab === "dashboard" && <Dashboard />}
-          {tab === "customers" && <Customers />}
-          {tab === "devices" && <Devices />}
-          {tab === "sendMessage" && <SendMessagePage />}
-          {tab === "generalSettings" && <GeneralSettingsPage />}
-          {tab === "payments" && <Payments />}
-          {tab === "numbers" && <WhitelistedNumbers />}
-          {tab === "roles" && <RolesList />}
-          {tab === "accounts" && <AccountManagement />}
-        </main>
+    <BrandingContext.Provider value={brandingValue}>
+      <div style={S.appShell}>
+        <GlobalStyle />
+        <TopBar email={session.user.email} />
+        <div style={S.appBody}>
+          <Sidebar tab={tab} setTab={setTab} />
+          <main style={S.main}>
+            {tab === "dashboard" && <Dashboard />}
+            {tab === "customers" && <Customers />}
+            {tab === "devices" && <Devices />}
+            {tab === "sendMessage" && <SendMessagePage />}
+            {tab === "generalSettings" && <GeneralSettingsPage />}
+            {tab === "payments" && <Payments />}
+            {tab === "numbers" && <WhitelistedNumbers />}
+            {tab === "roles" && <RolesList />}
+            {tab === "accounts" && <AccountManagement />}
+          </main>
+        </div>
       </div>
-    </div>
+    </BrandingContext.Provider>
   );
 }
 
+function BrandLogo({ size = 28 }) {
+  const { name, iconUrl } = useContext(BrandingContext);
+  if (iconUrl) {
+    return <img src={iconUrl} alt={name} style={{ width: size, height: size, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} />;
+  }
+  return <div style={{ ...S.logoMark, width: size, height: size }}>{(name || "N").charAt(0).toUpperCase()}</div>;
+}
+
 function TopBar({ email }) {
+  const { name } = useContext(BrandingContext);
   return (
     <header style={S.topbar}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={S.logoMark}>N</div>
-        <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>Northline Portal</span>
+        <BrandLogo />
+        <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>{name}</span>
         <span style={{ fontSize: 13, color: "#9AA1AE", marginLeft: 4 }}>Hi, welcome back</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
@@ -114,6 +136,7 @@ function GlobalStyle() {
 /* ---------------- AUTH ---------------- */
 
 function LoginScreen() {
+  const { name } = useContext(BrandingContext);
   const [mode, setMode] = useState("signIn");
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
@@ -137,8 +160,8 @@ function LoginScreen() {
       <GlobalStyle />
       <div style={S.loginCard}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
-          <div style={S.logoMark}>N</div>
-          <span className="serif" style={{ fontSize: 18, color: "#14161C" }}>Northline</span>
+          <BrandLogo />
+          <span className="serif" style={{ fontSize: 18, color: "#14161C" }}>{name}</span>
         </div>
         <h1 className="serif" style={{ fontSize: 24, color: "#14161C", margin: "0 0 6px" }}>
           {mode === "signIn" ? "Sign in" : "Create account"}
@@ -1649,6 +1672,59 @@ function SettingsCard({ title, description, toggle, checked, onToggle, children 
 }
 
 function GeneralSettingsPage() {
+  const branding = useContext(BrandingContext);
+  const [name, setName] = useState(branding.name || "");
+  const [savingName, setSavingName] = useState(false);
+  const [nameMsg, setNameMsg] = useState("");
+  const [uploadingIcon, setUploadingIcon] = useState(false);
+  const [iconMsg, setIconMsg] = useState("");
+  const iconInputRef = useRef(null);
+
+  useEffect(() => { setName(branding.name || ""); }, [branding.name]);
+
+  async function saveName() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setSavingName(true);
+    setNameMsg("");
+    const { error } = await supabase.from("app_branding").update({ name: trimmed }).eq("id", 1);
+    setSavingName(false);
+    if (error) setNameMsg(error.message);
+    else {
+      setNameMsg("Saved.");
+      branding.reload();
+    }
+  }
+
+  async function onIconChosen(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 50 * 1024) {
+      setIconMsg("File too large — max 50KB.");
+      if (iconInputRef.current) iconInputRef.current.value = "";
+      return;
+    }
+    setUploadingIcon(true);
+    setIconMsg("");
+    const ext = (file.name.split(".").pop() || "png").toLowerCase();
+    const path = `icon-${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage.from("branding").upload(path, file, { upsert: true });
+    if (upErr) {
+      setUploadingIcon(false);
+      setIconMsg(upErr.message);
+      return;
+    }
+    const { data: pub } = supabase.storage.from("branding").getPublicUrl(path);
+    const { error: updErr } = await supabase.from("app_branding").update({ icon_url: pub.publicUrl }).eq("id", 1);
+    setUploadingIcon(false);
+    if (updErr) setIconMsg(updErr.message);
+    else {
+      setIconMsg("Icon updated.");
+      branding.reload();
+    }
+    if (iconInputRef.current) iconInputRef.current.value = "";
+  }
+
   const [t, setToggles] = useState({
     forceUpgrade: false, allowReminders: false, whitelistedAppsOn: false,
     watermarkLockscreen: false, watermarkSimRemoved: false, antiUninstall: false,
@@ -1661,15 +1737,35 @@ function GeneralSettingsPage() {
     <div>
       <PageHeader eyebrow="Custom Management" title="General Settings" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Layout only for now — nothing on this page is wired up or saved yet.
+        Product name and icon below are live. The rest of this page is layout only for now — not wired up or saved yet.
       </p>
 
       <div style={{ maxWidth: 640 }}>
         <SettingsCard title="Product name and icon" description="Product name and icon configured below will show to the end user if they open the app.">
-          <Field label="Name"><input style={S.input} maxLength={50} placeholder="Karachi Electronics" /></Field>
+          <Field label="Name">
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input style={S.input} maxLength={50} placeholder="Karachi Electronics" value={name} onChange={(e) => setName(e.target.value)} />
+              <button type="button" style={{ ...S.primaryBtn, flexShrink: 0, opacity: savingName ? 0.7 : 1 }} onClick={saveName} disabled={savingName}>
+                {savingName ? "Saving…" : "Save"}
+              </button>
+            </div>
+            {nameMsg && <p style={{ fontSize: 11.5, color: nameMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "6px 0 0" }}>{nameMsg}</p>}
+          </Field>
           <Field label="Icon">
-            <button type="button" style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6 }}><Upload size={14} /> Upload icon</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <BrandLogo size={40} />
+              <input ref={iconInputRef} type="file" accept="image/png" style={{ display: "none" }} onChange={onIconChosen} />
+              <button
+                type="button"
+                style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6, opacity: uploadingIcon ? 0.7 : 1 }}
+                onClick={() => iconInputRef.current?.click()}
+                disabled={uploadingIcon}
+              >
+                <Upload size={14} /> {uploadingIcon ? "Uploading…" : "Upload icon"}
+              </button>
+            </div>
             <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "8px 0 0" }}>PNG only, up to 512×512, max 50KB.</p>
+            {iconMsg && <p style={{ fontSize: 11.5, color: iconMsg === "Icon updated." ? "#1E8E5A" : "#D6414C", margin: "4px 0 0" }}>{iconMsg}</p>}
           </Field>
         </SettingsCard>
 
