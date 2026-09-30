@@ -421,6 +421,12 @@ function Devices() {
   const [confirmDeletePlan, setConfirmDeletePlan] = useState(null);
   const [planError, setPlanError] = useState("");
 
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [imeiFilter, setImeiFilter] = useState("");
+  const [modelFilter, setModelFilter] = useState("");
+  const [enrollFrom, setEnrollFrom] = useState("");
+  const [enrollTo, setEnrollTo] = useState("");
+
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
@@ -748,6 +754,56 @@ function Devices() {
     load();
   }
 
+  const filteredDevices = useMemo(() => {
+    return devices.filter((d) => {
+      if (statusFilter === "locked" && !d.is_locked) return false;
+      if (statusFilter === "active" && d.is_locked) return false;
+      if (statusFilter === "noSim" && !d.sim_missing) return false;
+      if (imeiFilter.trim() && !(d.imei || "").toLowerCase().includes(imeiFilter.trim().toLowerCase())) return false;
+      if (modelFilter.trim() && !(d.device_model || "").toLowerCase().includes(modelFilter.trim().toLowerCase())) return false;
+      if (enrollFrom && (d.provisioned_at || "").slice(0, 10) < enrollFrom) return false;
+      if (enrollTo && (d.provisioned_at || "").slice(0, 10) > enrollTo) return false;
+      return true;
+    });
+  }, [devices, statusFilter, imeiFilter, modelFilter, enrollFrom, enrollTo]);
+
+  const licenseStats = useMemo(() => {
+    const activated = devices.filter((d) => d.last_seen_at).length;
+    return {
+      total: TOTAL_DEVICE_LICENSES,
+      activated,
+      pending: devices.length - activated,
+      remaining: Math.max(TOTAL_DEVICE_LICENSES - devices.length, 0),
+    };
+  }, [devices]);
+
+  function resetFilters() {
+    setStatusFilter("all");
+    setImeiFilter("");
+    setModelFilter("");
+    setEnrollFrom("");
+    setEnrollTo("");
+  }
+
+  function exportCsv() {
+    const header = ["Device model", "IMEI", "Status", "Enrolled", "Last seen"];
+    const rows = filteredDevices.map((d) => [
+      d.device_model || "",
+      d.imei || "",
+      d.is_locked ? "Locked" : "Active",
+      d.provisioned_at || "",
+      d.last_seen_at || "",
+    ]);
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "devices.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Fleet" title="Devices" count={devices.length}>
@@ -755,13 +811,43 @@ function Devices() {
           <Plus size={16} /> Add device
         </button>
       </PageHeader>
+
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", margin: "-8px 0 20px", fontSize: 13, color: "#374151" }}>
+        <span>Total licenses: <strong>{licenseStats.total}</strong></span>
+        <span>Activated: <strong>{licenseStats.activated}</strong></span>
+        <span>Pending: <strong>{licenseStats.pending}</strong></span>
+        <span>Remaining: <strong>{licenseStats.remaining}</strong></span>
+      </div>
+
+      <div style={{ ...S.tableCard, padding: 18, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <select style={{ ...S.select, minWidth: 140 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="locked">Locked</option>
+            <option value="active">Active</option>
+            <option value="noSim">No SIM</option>
+          </select>
+          <input style={{ ...S.input, width: 200 }} value={imeiFilter} onChange={(e) => setImeiFilter(e.target.value)} placeholder="IMEI" />
+          <input style={{ ...S.input, width: 200 }} value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} placeholder="Device model" />
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 12.5, color: "#6B7280" }}>Enrolled</span>
+          <input style={{ ...S.input, width: 160 }} type="date" value={enrollFrom} onChange={(e) => setEnrollFrom(e.target.value)} />
+          <span style={{ fontSize: 12.5, color: "#6B7280" }}>to</span>
+          <input style={{ ...S.input, width: 160 }} type="date" value={enrollTo} onChange={(e) => setEnrollTo(e.target.value)} />
+          <button style={S.secondaryBtn} onClick={resetFilters}>Reset</button>
+          <button style={{ ...S.secondaryBtn, marginLeft: "auto" }} onClick={exportCsv}>Export</button>
+        </div>
+      </div>
+
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>{["Device", "IMEI", "Status", "Last seen", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
             {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
             {!loading && devices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices yet.</td></tr>}
-            {devices.map((d) => {
+            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices match these filters.</td></tr>}
+            {filteredDevices.map((d) => {
               const lastCmd = d.device_commands?.sort((a, b) => new Date(b.issued_at) - new Date(a.issued_at))[0];
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
               return (
