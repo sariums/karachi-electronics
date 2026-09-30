@@ -185,12 +185,12 @@ function Sidebar({ tab, setTab }) {
         { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
       ],
     },
+    { id: "payments", label: "Payments", icon: Wallet },
     {
       group: "Custom Management", icon: Sliders, items: [
         { id: "sendMessage", label: "Send Message", icon: Send },
       ],
     },
-    { id: "payments", label: "Payments", icon: Wallet },
     {
       group: "Settings Management", icon: Settings, items: [
         { id: "roles", label: "Role List", icon: ShieldCheck },
