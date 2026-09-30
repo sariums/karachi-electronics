@@ -60,6 +60,7 @@ export default function App() {
           {tab === "customers" && <Customers />}
           {tab === "devices" && <Devices />}
           {tab === "sendMessage" && <SendMessagePage />}
+          {tab === "generalSettings" && <GeneralSettingsPage />}
           {tab === "payments" && <Payments />}
           {tab === "numbers" && <WhitelistedNumbers />}
           {tab === "roles" && <RolesList />}
@@ -189,6 +190,7 @@ function Sidebar({ tab, setTab }) {
     {
       group: "Custom Management", icon: Sliders, items: [
         { id: "sendMessage", label: "Send Message", icon: Send },
+        { id: "generalSettings", label: "General Settings", icon: Settings },
       ],
     },
     {
@@ -1608,6 +1610,197 @@ function PhonePreview({ variant, title, content, number }) {
         )}
       </div>
       <p style={{ textAlign: "center", fontSize: 11.5, color: "#9AA1AE", marginTop: 10 }}>Live preview</p>
+    </div>
+  );
+}
+
+/* ---------------- GENERAL SETTINGS (UI only, wiring later) ---------------- */
+
+function ToggleSwitch({ checked, onChange }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      aria-pressed={checked}
+      style={{
+        width: 38, height: 22, borderRadius: 11, border: "none", padding: 2,
+        background: checked ? "#0E9488" : "#D8DCE3", display: "flex", alignItems: "center",
+        justifyContent: checked ? "flex-end" : "flex-start", cursor: "pointer", flexShrink: 0,
+      }}
+    >
+      <span style={{ width: 18, height: 18, borderRadius: "50%", background: "#FFFFFF", boxShadow: "0 1px 2px rgba(0,0,0,0.25)", display: "block" }} />
+    </button>
+  );
+}
+
+function SettingsCard({ title, description, toggle, checked, onToggle, children }) {
+  return (
+    <div style={{ ...S.tableCard, padding: 22, marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
+        <div>
+          <h3 className="serif" style={{ fontSize: 15.5, color: "#14161C", margin: "0 0 4px" }}>{title}</h3>
+          {description && <p style={{ fontSize: 12.5, color: "#6B7280", margin: 0, lineHeight: 1.6, maxWidth: 620 }}>{description}</p>}
+        </div>
+        {toggle && <ToggleSwitch checked={checked} onChange={onToggle} />}
+      </div>
+      {children && <div style={{ marginTop: 18 }}>{children}</div>}
+    </div>
+  );
+}
+
+function GeneralSettingsPage() {
+  const [t, setToggles] = useState({
+    forceUpgrade: false, allowReminders: false, whitelistedAppsOn: false,
+    watermarkLockscreen: false, watermarkSimRemoved: false, antiUninstall: false,
+    everyBoot: false, simSwap: false, simRemoved: false, offlineDays: false,
+    priorLock: false, afterLockRemoval: false, activation: false,
+  });
+  const setOne = (key) => (val) => setToggles((prev) => ({ ...prev, [key]: val }));
+
+  return (
+    <div>
+      <PageHeader eyebrow="Custom Management" title="General Settings" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
+        Layout only for now — nothing on this page is wired up or saved yet.
+      </p>
+
+      <div style={{ maxWidth: 640 }}>
+        <SettingsCard title="Product name and icon" description="Product name and icon configured below will show to the end user if they open the app.">
+          <Field label="Name"><input style={S.input} maxLength={50} placeholder="Karachi Electronics" /></Field>
+          <Field label="Icon">
+            <button type="button" style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6 }}><Upload size={14} /> Upload icon</button>
+            <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "8px 0 0" }}>PNG only, up to 512×512, max 50KB.</p>
+          </Field>
+        </SettingsCard>
+
+        <SettingsCard title="Available remaining amount warning value" description="When the remaining available licenses are lower than the set warning value, the system will automatically send an email notification.">
+          <Field label="Remaining license warning value"><input style={S.input} type="number" placeholder="3" /></Field>
+          <Field label="Notify recipients"><input style={S.input} placeholder="you@karachielectronics.pk" /></Field>
+        </SettingsCard>
+
+        <SettingsCard
+          title="Force upgrade to latest version"
+          description="When the app is activated, if it finds the device has an upgradeable security version, it will force the device to upgrade to the latest version."
+          toggle checked={t.forceUpgrade} onToggle={setOne("forceUpgrade")}
+        />
+
+        <SettingsCard
+          title="Remind device users to upgrade to a higher and more secure OS version"
+          description="When a new security version is available, the customer is proactively reminded to upgrade. It is not mandatory."
+          toggle checked={t.allowReminders} onToggle={setOne("allowReminders")}
+        />
+
+        <SettingsCard title="Outgoing whitelisted phone numbers" description="The customer can make outgoing calls with the numbers listed below. Numbers only, separated by commas.">
+          <textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. 03001234567,03211234567" />
+        </SettingsCard>
+
+        <SettingsCard title="Incoming whitelisted phone numbers" description="The customer can receive calls from the numbers listed below. Numbers only, separated by commas.">
+          <textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. 03001234567,03211234567" />
+        </SettingsCard>
+
+        <SettingsCard
+          title="Whitelisted Apps"
+          description="List the package names of mobile apps that customers are allowed to use when their phone is locked."
+          toggle checked={t.whitelistedAppsOn} onToggle={setOne("whitelistedAppsOn")}
+        >
+          {t.whitelistedAppsOn && (
+            <Field label="Whitelisted apps">
+              <textarea style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. com.whatsapp,com.google.android.dialer" />
+            </Field>
+          )}
+        </SettingsCard>
+
+        <SettingsCard title="Disconnection Auto-lock" description="When the device stays offline beyond the set time limit, it will automatically trigger an offline screen lock, released once the customer reconnects.">
+          <Field label="Device on monthly repayment (hours)"><input style={S.input} type="number" placeholder="840" /></Field>
+          <Field label="Device on bi-weekly repayment (hours)"><input style={S.input} type="number" placeholder="336" /></Field>
+          <Field label="Device on weekly repayment (hours)"><input style={S.input} type="number" placeholder="168" /></Field>
+          <Field label="Device on daily repayment (hours)"><input style={S.input} type="number" placeholder="24" /></Field>
+        </SettingsCard>
+
+        <SettingsCard
+          title="Watermark on the lockscreen"
+          description="Once the device is activated, the lockscreen will display watermark information. This feature helps prevent resale."
+          toggle checked={t.watermarkLockscreen} onToggle={setOne("watermarkLockscreen")}
+        />
+
+        <SettingsCard
+          title="Launcher watermark of SIM removed"
+          description="A watermark that changes color automatically is placed on the launcher once all SIMs are removed. Helps prevent resale."
+          toggle checked={t.watermarkSimRemoved} onToggle={setOne("watermarkSimRemoved")}
+        >
+          {t.watermarkSimRemoved && (
+            <Field label="Watermark text">
+              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} maxLength={100} placeholder="This device is property of Karachi Electronics, purchased on installments." />
+            </Field>
+          )}
+        </SettingsCard>
+
+        <SettingsCard title="Your app" description="When customers tap the notification message or the locked app, they'll be taken to the app you configure here.">
+          <Field label="App package name"><input style={S.input} placeholder="e.g. com.karachielectronics.app" /></Field>
+          <Field label="Page name"><input style={S.input} placeholder="e.g. com.karachielectronics.app.MainActivity" /></Field>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+            <span style={{ fontSize: 13, color: "#374151" }}>Anti-Uninstall Protection</span>
+            <ToggleSwitch checked={t.antiUninstall} onChange={setOne("antiUninstall")} />
+          </div>
+        </SettingsCard>
+
+        <SettingsCard title="Message of every time device boot" description="Display a notification message every time the customer boots the device." toggle checked={t.everyBoot} onToggle={setOne("everyBoot")} />
+        <SettingsCard title="Message of SIM swap" description="Display a pop-up message when the customer changes SIM." toggle checked={t.simSwap} onToggle={setOne("simSwap")} />
+        <SettingsCard title="Message of SIM removed" description="Display a notification message when all SIMs are removed. This feature can prevent resale." toggle checked={t.simRemoved} onToggle={setOne("simRemoved")} />
+
+        <SettingsCard
+          title="Message of offline beyond X Days"
+          description="Display a notification message when the customer is offline beyond some days."
+          toggle checked={t.offlineDays} onToggle={setOne("offlineDays")}
+        >
+          {t.offlineDays && (
+            <>
+              <Field label="Title"><input style={S.input} maxLength={80} placeholder="Mobile Locking Indication" /></Field>
+              <Field label="Content"><textarea style={{ ...S.input, minHeight: 80, resize: "vertical", fontFamily: "inherit" }} maxLength={500} placeholder="This device is purchased on installments from Karachi Electronics…" /></Field>
+              <Field label="Effective time">
+                <select style={{ ...S.select, width: "100%" }} defaultValue="7">
+                  <option value="1">Offline beyond 1 day</option>
+                  <option value="3">Offline beyond 3 days</option>
+                  <option value="7">Offline beyond 7 days</option>
+                  <option value="14">Offline beyond 14 days</option>
+                  <option value="30">Offline beyond 30 days</option>
+                </select>
+              </Field>
+              <Field label="Type">
+                <div style={{ display: "flex", gap: 20 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}><input type="radio" name="offlineType" defaultChecked /> Dismissable</label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}><input type="radio" name="offlineType" /> Non-dismissable</label>
+                </div>
+              </Field>
+            </>
+          )}
+        </SettingsCard>
+
+        <SettingsCard title="Message prior to lock device" description="Display a notification message before device locking." toggle checked={t.priorLock} onToggle={setOne("priorLock")} />
+
+        <SettingsCard
+          title="Message after lock removal"
+          description="Display a notification message after the device is unlocked and removed from the installment program."
+          toggle checked={t.afterLockRemoval} onToggle={setOne("afterLockRemoval")}
+        >
+          {t.afterLockRemoval && (
+            <>
+              <Field label="Title"><input style={S.input} maxLength={80} placeholder="Congratulations" /></Field>
+              <Field label="Content"><textarea style={{ ...S.input, minHeight: 80, resize: "vertical", fontFamily: "inherit" }} maxLength={500} placeholder="You have fully repaid the loan. The device will no longer be restricted." /></Field>
+              <Field label="Type">
+                <div style={{ display: "flex", gap: 20 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}><input type="radio" name="afterLockType" /> Dismissable</label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}><input type="radio" name="afterLockType" defaultChecked /> Non-dismissable</label>
+                </div>
+              </Field>
+            </>
+          )}
+        </SettingsCard>
+
+        <SettingsCard title="Message of activation" description="Display a notification message when the lock is activated." toggle checked={t.activation} onToggle={setOne("activation")} />
+
+        <button style={{ ...S.primaryBtn, marginTop: 8 }}>Submit</button>
+      </div>
     </div>
   );
 }
