@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useContext, createContext } from "react";
 import {
   Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
-  Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell, Phone,
+  Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
   ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming,
 } from "lucide-react";
@@ -78,7 +78,6 @@ export default function App() {
             {tab === "sendMessage" && <SendMessagePage />}
             {tab === "generalSettings" && <GeneralSettingsPage />}
             {tab === "payments" && <Payments />}
-            {tab === "numbers" && <WhitelistedNumbers />}
             {tab === "roles" && <RolesList />}
             {tab === "accounts" && <AccountManagement />}
           </main>
@@ -210,7 +209,6 @@ function Sidebar({ tab, setTab }) {
     {
       group: "Device Management", icon: Smartphone, items: [
         { id: "devices", label: "Devices", icon: Smartphone },
-        { id: "numbers", label: "Whitelisted Numbers", icon: Phone },
       ],
     },
     { id: "payments", label: "Payments", icon: Wallet },
@@ -1332,100 +1330,6 @@ function Payments() {
 
 /* ---------------- WHITELISTED NUMBERS ---------------- */
 
-function WhitelistedNumbers() {
-  const [numbers, setNumbers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [draft, setDraft] = useState(emptyNumber());
-  const [errors, setErrors] = useState({});
-  const [confirmDelete, setConfirmDelete] = useState(null);
-
-  function emptyNumber() { return { id: null, label: "", phone_number: "" }; }
-
-  useEffect(() => { load(); }, []);
-
-  async function load() {
-    setLoading(true);
-    const { data } = await supabase.from("whitelisted_numbers").select("*").order("created_at", { ascending: false });
-    setNumbers(data || []);
-    setLoading(false);
-  }
-
-  function openAdd() { setDraft(emptyNumber()); setErrors({}); setDrawerOpen(true); }
-  function openEdit(n) { setDraft({ ...n }); setErrors({}); setDrawerOpen(true); }
-
-  async function save() {
-    const e = {};
-    if (!draft.label.trim()) e.label = "Enter a label.";
-    if (!draft.phone_number.trim()) e.phone_number = "Enter a phone number.";
-    setErrors(e);
-    if (Object.keys(e).length) return;
-
-    const payload = { label: draft.label.trim(), phone_number: draft.phone_number.trim() };
-    if (draft.id == null) await supabase.from("whitelisted_numbers").insert(payload);
-    else await supabase.from("whitelisted_numbers").update(payload).eq("id", draft.id);
-    setDrawerOpen(false);
-    load();
-  }
-
-  async function performDelete(id) {
-    await supabase.from("whitelisted_numbers").delete().eq("id", id);
-    setConfirmDelete(null);
-    load();
-  }
-
-  return (
-    <div>
-      <PageHeader eyebrow="Config" title="Whitelisted Numbers" count={numbers.length}>
-        <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Add number</button>
-      </PageHeader>
-      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 520 }}>
-        Locked phones show a "Call {"{label}"}" button for each number below — these are the only numbers a locked customer can reach.
-      </p>
-
-      <div style={S.tableCard}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Label", "Phone number", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {loading && <tr><td colSpan={3} style={S.emptyCell}>Loading…</td></tr>}
-            {!loading && numbers.length === 0 && <tr><td colSpan={3} style={S.emptyCell}>No whitelisted numbers yet.</td></tr>}
-            {numbers.map((n) => (
-              <tr key={n.id} style={S.tr}>
-                <td style={S.td}>{n.label}</td>
-                <td style={S.td} className="mono">{n.phone_number}</td>
-                <td style={{ ...S.td, textAlign: "right" }}>
-                  <button style={S.iconBtn} onClick={() => openEdit(n)} aria-label="Edit"><Pencil size={15} /></button>
-                  <button style={{ ...S.iconBtn, marginLeft: 4 }} onClick={() => setConfirmDelete(n)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {drawerOpen && (
-        <Drawer title={draft.id == null ? "Add number" : "Edit number"} onClose={() => setDrawerOpen(false)}>
-          <Field label="Label" error={errors.label}><input style={S.input} value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} placeholder="Karachi Electronics - Gulshan Branch" /></Field>
-          <Field label="Phone number" error={errors.phone_number}><input style={S.input} value={draft.phone_number} onChange={(e) => setDraft({ ...draft, phone_number: e.target.value })} placeholder="02112345678" /></Field>
-          <div style={{ display: "flex", gap: 10, marginTop: 28 }}>
-            <button style={S.primaryBtn} onClick={save}>{draft.id == null ? "Add number" : "Save changes"}</button>
-            <button style={S.secondaryBtn} onClick={() => setDrawerOpen(false)}>Cancel</button>
-          </div>
-        </Drawer>
-      )}
-
-      {confirmDelete && (
-        <ConfirmDialog
-          title="Remove number"
-          message={`${confirmDelete.label} will be removed from the whitelist. Locked customers will no longer be able to call it. This can't be undone.`}
-          onConfirm={() => performDelete(confirmDelete.id)}
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )}
-    </div>
-  );
-}
-
 /* ---------------- SEND MESSAGE (UI only, wiring later) ---------------- */
 
 function SendMessagePage() {
@@ -1736,6 +1640,38 @@ function GeneralSettingsPage() {
     setLicenseMsg(error ? error.message : "Saved.");
   }
 
+  const [outgoingNumbers, setOutgoingNumbers] = useState("");
+  const [savingOutgoing, setSavingOutgoing] = useState(false);
+  const [outgoingMsg, setOutgoingMsg] = useState("");
+
+  useEffect(() => {
+    supabase.from("whitelisted_numbers").select("phone_number").order("created_at", { ascending: true })
+      .then(({ data }) => setOutgoingNumbers((data || []).map((r) => r.phone_number).join(", ")));
+  }, []);
+
+  async function saveOutgoingNumbers() {
+    const list = [...new Set(outgoingNumbers.split(",").map((n) => n.trim()).filter(Boolean))];
+    setSavingOutgoing(true);
+    setOutgoingMsg("");
+    const { error: delErr } = await supabase.from("whitelisted_numbers").delete().not("id", "is", null);
+    if (delErr) {
+      setSavingOutgoing(false);
+      setOutgoingMsg(delErr.message);
+      return;
+    }
+    if (list.length) {
+      const { error: insErr } = await supabase.from("whitelisted_numbers").insert(list.map((n) => ({ label: n, phone_number: n })));
+      if (insErr) {
+        setSavingOutgoing(false);
+        setOutgoingMsg(insErr.message);
+        return;
+      }
+    }
+    setOutgoingNumbers(list.join(", "));
+    setSavingOutgoing(false);
+    setOutgoingMsg("Saved.");
+  }
+
   async function saveName() {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -1859,8 +1795,17 @@ function GeneralSettingsPage() {
           toggle checked={t.allowReminders} onToggle={setOne("allowReminders")}
         />
 
-        <SettingsCard title="Outgoing whitelisted phone numbers" description="The customer can make outgoing calls with the numbers listed below. Numbers only, separated by commas.">
-          <textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} placeholder="e.g. 03001234567,03211234567" />
+        <SettingsCard title="Outgoing whitelisted phone numbers" description="The customer can make outgoing calls with the numbers listed below — this is what shows as call buttons on a locked phone. Numbers only, separated by commas.">
+          <textarea
+            style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }}
+            placeholder="e.g. 03001234567,03211234567"
+            value={outgoingNumbers}
+            onChange={(e) => setOutgoingNumbers(e.target.value)}
+          />
+          <button type="button" style={{ ...S.primaryBtn, marginTop: 10, opacity: savingOutgoing ? 0.7 : 1 }} onClick={saveOutgoingNumbers} disabled={savingOutgoing}>
+            {savingOutgoing ? "Saving…" : "Save"}
+          </button>
+          {outgoingMsg && <p style={{ fontSize: 11.5, color: outgoingMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "8px 0 0" }}>{outgoingMsg}</p>}
         </SettingsCard>
 
         <SettingsCard title="Incoming whitelisted phone numbers" description="The customer can receive calls from the numbers listed below. Numbers only, separated by commas.">
