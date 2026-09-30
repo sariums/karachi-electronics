@@ -1701,6 +1701,46 @@ function GeneralSettingsPage() {
     }
   }
 
+  const [lockscreenWatermark, setLockscreenWatermark] = useState(false);
+  const [savingLockscreenWatermark, setSavingLockscreenWatermark] = useState(false);
+  const [lockscreenWatermarkMsg, setLockscreenWatermarkMsg] = useState("");
+
+  const [simWatermarkEnabled, setSimWatermarkEnabled] = useState(false);
+  const [simWatermarkText, setSimWatermarkText] = useState("");
+  const [savingSimWatermark, setSavingSimWatermark] = useState(false);
+  const [simWatermarkMsg, setSimWatermarkMsg] = useState("");
+
+  useEffect(() => {
+    supabase.from("app_branding")
+      .select("watermark_lockscreen_enabled, watermark_sim_removed_enabled, watermark_sim_removed_text")
+      .eq("id", 1).maybeSingle()
+      .then(({ data }) => {
+        setLockscreenWatermark(!!data?.watermark_lockscreen_enabled);
+        setSimWatermarkEnabled(!!data?.watermark_sim_removed_enabled);
+        setSimWatermarkText(data?.watermark_sim_removed_text || "");
+      });
+  }, []);
+
+  async function saveLockscreenWatermark(val) {
+    setLockscreenWatermark(val);
+    setSavingLockscreenWatermark(true);
+    setLockscreenWatermarkMsg("");
+    const { error } = await supabase.from("app_branding").update({ watermark_lockscreen_enabled: val }).eq("id", 1);
+    setSavingLockscreenWatermark(false);
+    setLockscreenWatermarkMsg(error ? error.message : "Saved.");
+  }
+
+  async function saveSimWatermark() {
+    setSavingSimWatermark(true);
+    setSimWatermarkMsg("");
+    const { error } = await supabase.from("app_branding").update({
+      watermark_sim_removed_enabled: simWatermarkEnabled,
+      watermark_sim_removed_text: simWatermarkText.trim() || null,
+    }).eq("id", 1);
+    setSavingSimWatermark(false);
+    setSimWatermarkMsg(error ? error.message : "Saved.");
+  }
+
   async function saveName() {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -1872,19 +1912,35 @@ function GeneralSettingsPage() {
         <SettingsCard
           title="Watermark on the lockscreen"
           description="Once the device is activated, the lockscreen will display watermark information. This feature helps prevent resale."
-          toggle checked={t.watermarkLockscreen} onToggle={setOne("watermarkLockscreen")}
-        />
+          toggle checked={lockscreenWatermark} onToggle={saveLockscreenWatermark}
+        >
+          {(savingLockscreenWatermark || lockscreenWatermarkMsg) && (
+            <p style={{ fontSize: 11.5, color: lockscreenWatermarkMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: 0 }}>
+              {savingLockscreenWatermark ? "Saving…" : lockscreenWatermarkMsg}
+            </p>
+          )}
+        </SettingsCard>
 
         <SettingsCard
           title="Launcher watermark of SIM removed"
           description="A watermark that changes color automatically is placed on the launcher once all SIMs are removed. Helps prevent resale."
-          toggle checked={t.watermarkSimRemoved} onToggle={setOne("watermarkSimRemoved")}
+          toggle checked={simWatermarkEnabled} onToggle={setSimWatermarkEnabled}
         >
-          {t.watermarkSimRemoved && (
+          {simWatermarkEnabled && (
             <Field label="Watermark text">
-              <textarea style={{ ...S.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }} maxLength={100} placeholder="This device is property of Karachi Electronics, purchased on installments." />
+              <textarea
+                style={{ ...S.input, minHeight: 60, resize: "vertical", fontFamily: "inherit" }}
+                maxLength={100}
+                placeholder="This device is property of Karachi Electronics, purchased on installments."
+                value={simWatermarkText}
+                onChange={(e) => setSimWatermarkText(e.target.value)}
+              />
             </Field>
           )}
+          <button type="button" style={{ ...S.primaryBtn, opacity: savingSimWatermark ? 0.7 : 1 }} onClick={saveSimWatermark} disabled={savingSimWatermark}>
+            {savingSimWatermark ? "Saving…" : "Save"}
+          </button>
+          {simWatermarkMsg && <p style={{ fontSize: 11.5, color: simWatermarkMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "8px 0 0" }}>{simWatermarkMsg}</p>}
         </SettingsCard>
 
         <SettingsCard title="Your app" description="When customers tap the notification message or the locked app, they'll be taken to the app you configure here.">
