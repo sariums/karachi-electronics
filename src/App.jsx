@@ -730,7 +730,7 @@ function Devices() {
     supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
   }
 
-  function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model, imei: d.imei || "" }); setError(""); }
+  function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model || "", imei: d.imei || "" }); setError(""); }
 
   async function saveEdit() {
     if (!editDraft.device_model.trim()) { setError("Enter a device model."); return; }
@@ -766,7 +766,7 @@ function Devices() {
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
               return (
                 <tr key={d.id} style={S.tr}>
-                  <td style={S.td}>{d.device_model}</td>
+                  <td style={S.td}>{d.device_model || d.imei || "—"}</td>
                   <td style={S.td} className="mono">{d.imei || "—"}</td>
                   <td style={S.td}>
                     <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
@@ -809,7 +809,7 @@ function Devices() {
       </div>
 
       {notifyDraft && (
-        <Drawer title={`Notify ${notifyDraft.device.device_model}`} onClose={() => setNotifyDraft(null)}>
+        <Drawer title={`Notify ${(notifyDraft.device.device_model || notifyDraft.device.imei)}`} onClose={() => setNotifyDraft(null)}>
           <Field label="Message" error={error}>
             <textarea
               style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
@@ -828,7 +828,7 @@ function Devices() {
       )}
 
       {callDraft && (
-        <Drawer title={`Push call · ${callDraft.device.device_model}`} onClose={() => setCallDraft(null)}>
+        <Drawer title={`Push call · ${(callDraft.device.device_model || callDraft.device.imei)}`} onClose={() => setCallDraft(null)}>
           <p style={{ fontSize: 12.5, color: "#6B7280", margin: "-8px 0 20px", lineHeight: 1.6 }}>
             Shows a simulated incoming call on the phone. On Answer, the message below is spoken aloud via on-device text-to-speech — not a real phone call.
           </p>
@@ -861,7 +861,7 @@ function Devices() {
         <div style={S.overlay}>
           <div style={S.confirmCard}>
             <h3 className="serif" style={{ fontSize: 18, color: "#14161C", margin: "0 0 4px" }}>
-              Audio call · {audioCall.device.device_model}
+              Audio call · {(audioCall.device.device_model || audioCall.device.imei)}
             </h3>
             <p style={{ fontSize: 13.5, color: "#6B7280", margin: "0 0 20px" }}>
               {audioCall.status === "connecting" && "Ringing the phone…"}
@@ -878,7 +878,7 @@ function Devices() {
       )}
 
       {historyDraft && (
-        <Drawer title={`Activity · ${historyDraft.device.device_model}`} onClose={() => setHistoryDraft(null)}>
+        <Drawer title={`Activity · ${(historyDraft.device.device_model || historyDraft.device.imei)}`} onClose={() => setHistoryDraft(null)}>
           {historyDraft.loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
           {!historyDraft.loading && historyDraft.events.length === 0 && (
             <p style={{ color: "#9AA1AE", fontSize: 13 }}>No activity yet.</p>
@@ -895,7 +895,7 @@ function Devices() {
       )}
 
       {appsDraft && (
-        <Drawer title={`Allowed apps · ${appsDraft.device.device_model}`} onClose={() => setAppsDraft(null)}>
+        <Drawer title={`Allowed apps · ${(appsDraft.device.device_model || appsDraft.device.imei)}`} onClose={() => setAppsDraft(null)}>
           {appsDraft.loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
           {!appsDraft.loading && appsDraft.apps.length === 0 && (
             <p style={{ color: "#9AA1AE", fontSize: 13 }}>No apps reported yet — this phone hasn't checked in.</p>
@@ -965,7 +965,7 @@ function Devices() {
       )}
 
       {plansDraft && (
-        <Drawer title={`Installment plans · ${plansDraft.device.device_model}`} onClose={() => setPlansDraft(null)}>
+        <Drawer title={`Installment plans · ${(plansDraft.device.device_model || plansDraft.device.imei)}`} onClose={() => setPlansDraft(null)}>
           {plansDraft.loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
           {!plansDraft.loading && plansDraft.plans.length === 0 && !planAddOpen && (
             <p style={{ color: "#9AA1AE", fontSize: 13, marginBottom: 16 }}>No installment plans yet.</p>
@@ -1060,6 +1060,8 @@ function DeviceSettingsPage() {
   const [deviceTag, setDeviceTag] = useState("");
   const [expiration, setExpiration] = useState("");
   const [lockOnActivation, setLockOnActivation] = useState(true);
+  const [enrolling, setEnrolling] = useState(false);
+  const [enrollMsg, setEnrollMsg] = useState("");
 
   const tabs = [
     { id: "enroll", label: "Enroll Device" },
@@ -1075,6 +1077,27 @@ function DeviceSettingsPage() {
     setDeviceTag("");
     setExpiration("");
     setLockOnActivation(true);
+    setEnrollMsg("");
+  }
+
+  async function enrollDevice() {
+    const trimmed = imei.trim();
+    if (!trimmed) { setEnrollMsg("Enter an IMEI."); return; }
+    setEnrolling(true);
+    setEnrollMsg("");
+    const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
+    const { error } = await supabase.from("devices").insert({
+      imei: trimmed,
+      is_locked: lockOnActivation,
+      unlock_pin,
+      unlock_pin_generated_at: new Date().toISOString(),
+    });
+    setEnrolling(false);
+    if (error) setEnrollMsg(error.message);
+    else {
+      setEnrollMsg("Device enrolled.");
+      setImei("");
+    }
   }
 
   const ChooseType = (
@@ -1105,13 +1128,13 @@ function DeviceSettingsPage() {
     </>
   );
 
-  const hasSearch = activeTab !== "unenroll";
+  const hasSearch = activeTab !== "unenroll" && activeTab !== "enroll";
 
   return (
     <div>
       <PageHeader eyebrow="Device Management" title="Device Settings" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Layout only for now — nothing on this page is wired up yet.
+        Enroll Device is live — it adds the device the same way Devices → Add device does. The rest of this page is layout only for now.
       </p>
 
       <div style={{ ...S.tableCard, padding: 0, maxWidth: 640 }}>
@@ -1132,40 +1155,54 @@ function DeviceSettingsPage() {
         </div>
 
         <div style={{ padding: 24 }}>
-          {ChooseType}
-
-          {unitType === "bulk" ? (
-            BulkUpload
-          ) : (
+          {activeTab === "enroll" && (
             <>
-              {activeTab === "enroll" && (
+              <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter IMEI (eg: 000111222333444)" /></Field>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 360, margin: "6px 0 4px" }}>
+                <span style={{ fontSize: 13, color: "#374151" }}>Lock immediately after activation</span>
+                <ToggleSwitch checked={lockOnActivation} onChange={setLockOnActivation} />
+              </div>
+            </>
+          )}
+
+          {activeTab !== "enroll" && (
+            <>
+              {ChooseType}
+
+              {unitType === "bulk" ? (
+                BulkUpload
+              ) : (
                 <>
-                  <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter IMEI (eg: 000111222333444)" /></Field>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 360, margin: "6px 0 4px" }}>
-                    <span style={{ fontSize: 13, color: "#374151" }}>Lock immediately after activation</span>
-                    <ToggleSwitch checked={lockOnActivation} onChange={setLockOnActivation} />
-                  </div>
+                  {activeTab === "expire" && (
+                    <>
+                      <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
+                      <Field label="Expiration"><input style={S.input} type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} /></Field>
+                    </>
+                  )}
+                  {activeTab === "restriction" && (
+                    <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
+                  )}
+                  {activeTab === "unenroll" && (
+                    <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter enrolled IMEI (eg: 000111222333444)" /></Field>
+                  )}
                 </>
-              )}
-              {activeTab === "expire" && (
-                <>
-                  <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
-                  <Field label="Expiration"><input style={S.input} type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} /></Field>
-                </>
-              )}
-              {activeTab === "restriction" && (
-                <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
-              )}
-              {activeTab === "unenroll" && (
-                <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter enrolled IMEI (eg: 000111222333444)" /></Field>
               )}
             </>
           )}
 
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            <button style={S.primaryBtn}>Submit</button>
+            {activeTab === "enroll" ? (
+              <button style={{ ...S.primaryBtn, opacity: enrolling ? 0.7 : 1 }} onClick={enrollDevice} disabled={enrolling}>
+                {enrolling ? "Submitting…" : "Submit"}
+              </button>
+            ) : (
+              <button style={S.primaryBtn}>Submit</button>
+            )}
             {hasSearch && <button style={S.secondaryBtn}>Search</button>}
           </div>
+          {activeTab === "enroll" && enrollMsg && (
+            <p style={{ fontSize: 12, color: enrollMsg === "Device enrolled." ? "#1E8E5A" : "#D6414C", margin: "10px 0 0" }}>{enrollMsg}</p>
+          )}
         </div>
       </div>
     </div>
