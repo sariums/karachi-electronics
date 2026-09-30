@@ -1943,10 +1943,6 @@ function GeneralSettingsPage() {
           {simWatermarkMsg && <p style={{ fontSize: 11.5, color: simWatermarkMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "8px 0 0" }}>{simWatermarkMsg}</p>}
         </SettingsCard>
 
-        <SettingsCard title="Message of every time device boot" description="Display a notification message every time the customer boots the device." toggle checked={t.everyBoot} onToggle={setOne("everyBoot")} />
-        <SettingsCard title="Message of SIM swap" description="Display a pop-up message when the customer changes SIM." toggle checked={t.simSwap} onToggle={setOne("simSwap")} />
-        <SettingsCard title="Message of SIM removed" description="Display a notification message when all SIMs are removed. This feature can prevent resale." toggle checked={t.simRemoved} onToggle={setOne("simRemoved")} />
-
         <SettingsCard
           title="Message of offline beyond X Days"
           description="Display a notification message when the customer is offline beyond some days."
@@ -1974,8 +1970,6 @@ function GeneralSettingsPage() {
             </>
           )}
         </SettingsCard>
-
-        <SettingsCard title="Message prior to lock device" description="Display a notification message before device locking." toggle checked={t.priorLock} onToggle={setOne("priorLock")} />
 
         <SettingsCard
           title="Message after lock removal"
