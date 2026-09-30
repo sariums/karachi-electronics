@@ -412,7 +412,7 @@ function Devices() {
   const [error, setError] = useState("");
 
   const [addDeviceOpen, setAddDeviceOpen] = useState(false);
-  const [addDeviceDraft, setAddDeviceDraft] = useState({ device_model: "", imei: "" });
+  const [addDeviceDraft, setAddDeviceDraft] = useState({ device_model: "", imei: "", device_tag: "" });
 
   const [plansDraft, setPlansDraft] = useState(null); // { device, plans, loading }
   const [planAddOpen, setPlanAddOpen] = useState(false);
@@ -424,6 +424,7 @@ function Devices() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [imeiFilter, setImeiFilter] = useState("");
   const [modelFilter, setModelFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
   const [enrollFrom, setEnrollFrom] = useState("");
   const [enrollTo, setEnrollTo] = useState("");
 
@@ -462,10 +463,11 @@ function Devices() {
     await supabase.from("devices").insert({
       device_model: addDeviceDraft.device_model.trim(),
       imei: addDeviceDraft.imei.trim() || null,
+      device_tag: addDeviceDraft.device_tag.trim() || null,
       unlock_pin,
       unlock_pin_generated_at: new Date().toISOString(),
     });
-    setAddDeviceDraft({ device_model: "", imei: "" });
+    setAddDeviceDraft({ device_model: "", imei: "", device_tag: "" });
     setAddDeviceOpen(false);
     load();
   }
@@ -736,13 +738,14 @@ function Devices() {
     supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
   }
 
-  function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model || "", imei: d.imei || "" }); setError(""); }
+  function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model || "", imei: d.imei || "", device_tag: d.device_tag || "" }); setError(""); }
 
   async function saveEdit() {
     if (!editDraft.device_model.trim()) { setError("Enter a device model."); return; }
     await supabase.from("devices").update({
       device_model: editDraft.device_model.trim(),
       imei: editDraft.imei.trim() || null,
+      device_tag: editDraft.device_tag.trim() || null,
     }).eq("id", editDraft.id);
     setEditDraft(null);
     load();
@@ -761,11 +764,12 @@ function Devices() {
       if (statusFilter === "noSim" && !d.sim_missing) return false;
       if (imeiFilter.trim() && !(d.imei || "").toLowerCase().includes(imeiFilter.trim().toLowerCase())) return false;
       if (modelFilter.trim() && !(d.device_model || "").toLowerCase().includes(modelFilter.trim().toLowerCase())) return false;
+      if (tagFilter.trim() && !(d.device_tag || "").toLowerCase().includes(tagFilter.trim().toLowerCase())) return false;
       if (enrollFrom && (d.provisioned_at || "").slice(0, 10) < enrollFrom) return false;
       if (enrollTo && (d.provisioned_at || "").slice(0, 10) > enrollTo) return false;
       return true;
     });
-  }, [devices, statusFilter, imeiFilter, modelFilter, enrollFrom, enrollTo]);
+  }, [devices, statusFilter, imeiFilter, modelFilter, tagFilter, enrollFrom, enrollTo]);
 
   const licenseStats = useMemo(() => {
     const activated = devices.filter((d) => d.last_seen_at).length;
@@ -781,14 +785,16 @@ function Devices() {
     setStatusFilter("all");
     setImeiFilter("");
     setModelFilter("");
+    setTagFilter("");
     setEnrollFrom("");
     setEnrollTo("");
   }
 
   function exportCsv() {
-    const header = ["Device model", "IMEI", "Status", "Enrolled", "Last seen"];
+    const header = ["Device model", "Device tag", "IMEI", "Status", "Enrolled", "Last seen"];
     const rows = filteredDevices.map((d) => [
       d.device_model || "",
+      d.device_tag || "",
       d.imei || "",
       d.is_locked ? "Locked" : "Active",
       d.provisioned_at || "",
@@ -829,6 +835,7 @@ function Devices() {
           </select>
           <input style={{ ...S.input, width: 200 }} value={imeiFilter} onChange={(e) => setImeiFilter(e.target.value)} placeholder="IMEI" />
           <input style={{ ...S.input, width: 200 }} value={modelFilter} onChange={(e) => setModelFilter(e.target.value)} placeholder="Device model" />
+          <input style={{ ...S.input, width: 200 }} value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} placeholder="Device tag" />
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontSize: 12.5, color: "#6B7280" }}>Enrolled</span>
@@ -842,17 +849,18 @@ function Devices() {
 
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Device", "IMEI", "Status", "Last seen", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Device", "Tag", "IMEI", "Status", "Last seen", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
-            {!loading && devices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices yet.</td></tr>}
-            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices match these filters.</td></tr>}
+            {loading && <tr><td colSpan={6} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && devices.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No devices yet.</td></tr>}
+            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No devices match these filters.</td></tr>}
             {filteredDevices.map((d) => {
               const lastCmd = d.device_commands?.sort((a, b) => new Date(b.issued_at) - new Date(a.issued_at))[0];
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
               return (
                 <tr key={d.id} style={S.tr}>
                   <td style={S.td}>{d.device_model || d.imei || "—"}</td>
+                  <td style={S.td}>{d.device_tag || "—"}</td>
                   <td style={S.td} className="mono">{d.imei || "—"}</td>
                   <td style={S.td}>
                     <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
@@ -1022,6 +1030,7 @@ function Devices() {
         <Drawer title="Edit device" onClose={() => setEditDraft(null)}>
           <Field label="Device model" error={error}><input style={S.input} value={editDraft.device_model} onChange={(e) => setEditDraft({ ...editDraft, device_model: e.target.value })} /></Field>
           <Field label="IMEI (optional)"><input style={S.input} value={editDraft.imei} onChange={(e) => setEditDraft({ ...editDraft, imei: e.target.value })} /></Field>
+          <Field label="Device tag (optional)"><input style={S.input} value={editDraft.device_tag} onChange={(e) => setEditDraft({ ...editDraft, device_tag: e.target.value })} /></Field>
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={S.primaryBtn} onClick={saveEdit}>Save changes</button>
             <button style={S.secondaryBtn} onClick={() => setEditDraft(null)}>Cancel</button>
@@ -1042,6 +1051,7 @@ function Devices() {
         <Drawer title="Add device" onClose={() => setAddDeviceOpen(false)}>
           <Field label="Device model"><input style={S.input} value={addDeviceDraft.device_model} onChange={(e) => setAddDeviceDraft({ ...addDeviceDraft, device_model: e.target.value })} placeholder="Samsung Galaxy A15" /></Field>
           <Field label="IMEI (optional)"><input style={S.input} value={addDeviceDraft.imei} onChange={(e) => setAddDeviceDraft({ ...addDeviceDraft, imei: e.target.value })} placeholder="356789104561234" /></Field>
+          <Field label="Device tag (optional)"><input style={S.input} value={addDeviceDraft.device_tag} onChange={(e) => setAddDeviceDraft({ ...addDeviceDraft, device_tag: e.target.value })} placeholder="e.g. a short custom label for this device" /></Field>
           {error && <p style={{ fontSize: 12, color: "#D6414C" }}>{error}</p>}
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
             <button style={S.primaryBtn} onClick={addDevice}>Add device</button>
@@ -1203,10 +1213,10 @@ function DeviceSettingsPage() {
     if (!trimmed) { setExpireMsg("Enter a device tag or IMEI."); return; }
     setExpireBusy(true);
     setExpireMsg("");
-    const { data, error } = await supabase.from("devices").select("id, expires_at").eq("imei", trimmed).maybeSingle();
+    const { data, error } = await supabase.from("devices").select("id, expires_at").or(`device_tag.eq.${trimmed},imei.eq.${trimmed}`).maybeSingle();
     setExpireBusy(false);
     if (error) { setExpireMsg(error.message); return; }
-    if (!data) { setExpireMsg("No device found with that IMEI."); return; }
+    if (!data) { setExpireMsg("No device found with that device tag or IMEI."); return; }
     setExpiration(data.expires_at || "");
     setExpireMsg(data.expires_at ? `Current expiration: ${data.expires_at}` : "No expiration set yet for this device.");
   }
@@ -1217,10 +1227,10 @@ function DeviceSettingsPage() {
     if (!expiration) { setExpireMsg("Choose an expiration date."); return; }
     setExpireBusy(true);
     setExpireMsg("");
-    const { data, error } = await supabase.from("devices").update({ expires_at: expiration }).eq("imei", trimmed).select("id");
+    const { data, error } = await supabase.from("devices").update({ expires_at: expiration }).or(`device_tag.eq.${trimmed},imei.eq.${trimmed}`).select("id");
     setExpireBusy(false);
     if (error) { setExpireMsg(error.message); return; }
-    if (!data || data.length === 0) { setExpireMsg("No device found with that IMEI."); return; }
+    if (!data || data.length === 0) { setExpireMsg("No device found with that device tag or IMEI."); return; }
     setExpireMsg("Expiration updated.");
   }
 
@@ -1248,10 +1258,10 @@ function DeviceSettingsPage() {
     if (!trimmed) { setRestrictionMsg("Enter a device tag or IMEI."); return; }
     setRestrictionBusy(true);
     setRestrictionMsg("");
-    const { data, error } = await supabase.from("devices").select("id, is_locked").eq("imei", trimmed).maybeSingle();
+    const { data, error } = await supabase.from("devices").select("id, is_locked").or(`device_tag.eq.${trimmed},imei.eq.${trimmed}`).maybeSingle();
     setRestrictionBusy(false);
     if (error) { setRestrictionMsg(error.message); return; }
-    if (!data) { setRestrictionMsg("No device found with that IMEI."); return; }
+    if (!data) { setRestrictionMsg("No device found with that device tag or IMEI."); return; }
     setRestrictionMsg(data.is_locked ? "Currently locked." : "Already unlocked.");
   }
 
@@ -1260,9 +1270,9 @@ function DeviceSettingsPage() {
     if (!trimmed) { setRestrictionMsg("Enter a device tag or IMEI."); return; }
     setRestrictionBusy(true);
     setRestrictionMsg("");
-    const { data: device, error: findErr } = await supabase.from("devices").select("id").eq("imei", trimmed).maybeSingle();
+    const { data: device, error: findErr } = await supabase.from("devices").select("id").or(`device_tag.eq.${trimmed},imei.eq.${trimmed}`).maybeSingle();
     if (findErr) { setRestrictionBusy(false); setRestrictionMsg(findErr.message); return; }
-    if (!device) { setRestrictionBusy(false); setRestrictionMsg("No device found with that IMEI."); return; }
+    if (!device) { setRestrictionBusy(false); setRestrictionMsg("No device found with that device tag or IMEI."); return; }
 
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("device_commands").insert({ device_id: device.id, command: "UNLOCK", issued_by: user?.email || "admin" });
