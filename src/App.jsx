@@ -946,7 +946,7 @@ function Devices() {
       {confirmDelete && (
         <ConfirmDialog
           title="Remove device"
-          message={`${confirmDelete.device_model} and its installment plans/payment history will be removed. This can't be undone.`}
+          message={`${confirmDelete.device_model || confirmDelete.imei || "This device"} and its installment plans/payment history will be removed. This can't be undone.`}
           onConfirm={() => performDelete(confirmDelete.id)}
           onCancel={() => setConfirmDelete(null)}
         />
