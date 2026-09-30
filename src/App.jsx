@@ -1075,6 +1075,8 @@ function DeviceSettingsPage() {
   const [unenrollBusy, setUnenrollBusy] = useState(false);
   const [unenrollMsg, setUnenrollMsg] = useState("");
   const [unenrollConfirm, setUnenrollConfirm] = useState(null);
+  const [restrictionBusy, setRestrictionBusy] = useState(false);
+  const [restrictionMsg, setRestrictionMsg] = useState("");
 
   function switchTab(id) {
     setActiveTab(id);
@@ -1087,6 +1089,7 @@ function DeviceSettingsPage() {
     setExpireMsg("");
     setUnenrollMsg("");
     setUnenrollConfirm(null);
+    setRestrictionMsg("");
   }
 
   async function enrollDevice() {
@@ -1154,6 +1157,38 @@ function DeviceSettingsPage() {
     setUnenrollMsg("Device unenrolled — fully removed from the app.");
   }
 
+  async function searchRestriction() {
+    const trimmed = deviceTag.trim();
+    if (!trimmed) { setRestrictionMsg("Enter a device tag or IMEI."); return; }
+    setRestrictionBusy(true);
+    setRestrictionMsg("");
+    const { data, error } = await supabase.from("devices").select("id, is_locked").eq("imei", trimmed).maybeSingle();
+    setRestrictionBusy(false);
+    if (error) { setRestrictionMsg(error.message); return; }
+    if (!data) { setRestrictionMsg("No device found with that IMEI."); return; }
+    setRestrictionMsg(data.is_locked ? "Currently locked." : "Already unlocked.");
+  }
+
+  async function submitRestriction() {
+    const trimmed = deviceTag.trim();
+    if (!trimmed) { setRestrictionMsg("Enter a device tag or IMEI."); return; }
+    setRestrictionBusy(true);
+    setRestrictionMsg("");
+    const { data: device, error: findErr } = await supabase.from("devices").select("id").eq("imei", trimmed).maybeSingle();
+    if (findErr) { setRestrictionBusy(false); setRestrictionMsg(findErr.message); return; }
+    if (!device) { setRestrictionBusy(false); setRestrictionMsg("No device found with that IMEI."); return; }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({ device_id: device.id, command: "UNLOCK", issued_by: user?.email || "admin" });
+    await supabase.from("devices").update({ is_locked: false }).eq("id", device.id);
+    await supabase.from("device_events").insert({ device_id: device.id, event_type: "UNLOCK", method: "ADMIN" });
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+
+    setRestrictionBusy(false);
+    setRestrictionMsg("Unlock command sent.");
+    setDeviceTag("");
+  }
+
   const ChooseType = (
     <Field label="Choose Type">
       <div style={{ display: "flex", gap: 20 }}>
@@ -1186,7 +1221,7 @@ function DeviceSettingsPage() {
     <div>
       <PageHeader eyebrow="Device Management" title="Device Settings" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Enroll Device, Update Device Expiration and Unenroll Device are live for single units — Unenroll fully removes the device from the app. Bulk units and Remove Phone Restriction are still layout only.
+        All four tabs are live for single units — Remove Phone Restriction sends an unlock command, Unenroll fully removes the device from the app. Bulk units are still layout only.
       </p>
 
       <div style={{ ...S.tableCard, padding: 0, maxWidth: 640 }}>
@@ -1217,7 +1252,11 @@ function DeviceSettingsPage() {
             </>
           )}
 
-          {activeTab !== "enroll" && (
+          {activeTab === "restriction" && (
+            <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
+          )}
+
+          {(activeTab === "expire" || activeTab === "unenroll") && (
             <>
               {ChooseType}
 
@@ -1230,9 +1269,6 @@ function DeviceSettingsPage() {
                       <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
                       <Field label="Expiration"><input style={S.input} type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} /></Field>
                     </>
-                  )}
-                  {activeTab === "restriction" && (
-                    <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
                   )}
                   {activeTab === "unenroll" && (
                     <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter enrolled IMEI (eg: 000111222333444)" /></Field>
@@ -1261,8 +1297,10 @@ function DeviceSettingsPage() {
 
             {activeTab === "restriction" && (
               <>
-                <button style={S.primaryBtn}>Submit</button>
-                <button style={S.secondaryBtn}>Search</button>
+                <button style={{ ...S.primaryBtn, opacity: restrictionBusy ? 0.7 : 1 }} onClick={submitRestriction} disabled={restrictionBusy}>
+                  {restrictionBusy ? "Submitting…" : "Submit"}
+                </button>
+                <button style={S.secondaryBtn} onClick={searchRestriction} disabled={restrictionBusy}>Search</button>
               </>
             )}
 
@@ -1282,6 +1320,9 @@ function DeviceSettingsPage() {
           )}
           {activeTab === "unenroll" && unenrollMsg && (
             <p style={{ fontSize: 12, color: unenrollMsg.startsWith("Device unenrolled") ? "#1E8E5A" : "#D6414C", margin: "10px 0 0" }}>{unenrollMsg}</p>
+          )}
+          {activeTab === "restriction" && restrictionMsg && (
+            <p style={{ fontSize: 12, color: restrictionMsg === "Unlock command sent." ? "#1E8E5A" : "#6B7280", margin: "10px 0 0" }}>{restrictionMsg}</p>
           )}
         </div>
       </div>
