@@ -78,6 +78,7 @@ export default function App() {
           <main style={S.main}>
             {tab === "dashboard" && <Dashboard />}
             {tab === "devices" && <Devices />}
+            {tab === "deviceSettings" && <DeviceSettingsPage />}
             {tab === "sendMessage" && <SendMessagePage />}
             {tab === "generalSettings" && <GeneralSettingsPage />}
             {tab === "roles" && <RolesList />}
@@ -206,6 +207,7 @@ function Sidebar({ tab, setTab }) {
     {
       group: "Device Management", icon: Smartphone, items: [
         { id: "devices", label: "Devices", icon: Smartphone },
+        { id: "deviceSettings", label: "Device Settings", icon: Settings },
       ],
     },
     {
@@ -1031,6 +1033,141 @@ function Devices() {
           onCancel={() => setConfirmDeletePlan(null)}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------------- DEVICE SETTINGS (UI only, wiring later) ---------------- */
+
+function UploadXlsBox() {
+  return (
+    <Field label="Upload xls">
+      <div style={{
+        width: 140, height: 100, border: "1px dashed #D5D9E0", borderRadius: 8,
+        display: "flex", alignItems: "center", justifyContent: "center", color: "#9AA1AE", cursor: "pointer",
+      }}>
+        <Plus size={20} />
+      </div>
+      <p style={{ fontSize: 11, color: "#9AA1AE", margin: "8px 0 0" }}>Tips: Only .xls files can be uploaded.</p>
+    </Field>
+  );
+}
+
+function DeviceSettingsPage() {
+  const [activeTab, setActiveTab] = useState("enroll");
+  const [unitType, setUnitType] = useState("single");
+  const [imei, setImei] = useState("");
+  const [deviceTag, setDeviceTag] = useState("");
+  const [expiration, setExpiration] = useState("");
+  const [lockOnActivation, setLockOnActivation] = useState(true);
+
+  const tabs = [
+    { id: "enroll", label: "Enroll Device" },
+    { id: "expire", label: "Update Device Expiration" },
+    { id: "restriction", label: "Remove Phone Restriction" },
+    { id: "unenroll", label: "Unenroll Device" },
+  ];
+
+  function switchTab(id) {
+    setActiveTab(id);
+    setUnitType("single");
+    setImei("");
+    setDeviceTag("");
+    setExpiration("");
+    setLockOnActivation(true);
+  }
+
+  const ChooseType = (
+    <Field label="Choose Type">
+      <div style={{ display: "flex", gap: 20 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
+          <input type="radio" checked={unitType === "single"} onChange={() => setUnitType("single")} /> Single unit
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#374151", cursor: "pointer" }}>
+          <input type="radio" checked={unitType === "bulk"} onChange={() => setUnitType("bulk")} /> Bulk units
+        </label>
+      </div>
+    </Field>
+  );
+
+  const BulkUpload = (
+    <>
+      <p style={{ fontSize: 12.5, color: "#6B7280", margin: "-6px 0 18px" }}>
+        Upload a xls file (<span style={{ color: "#B7791F", cursor: "pointer" }}>Template download</span>)
+      </p>
+      {activeTab === "enroll" && (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 360, marginBottom: 18 }}>
+          <span style={{ fontSize: 13, color: "#374151" }}>Lock immediately after activation</span>
+          <ToggleSwitch checked={lockOnActivation} onChange={setLockOnActivation} />
+        </div>
+      )}
+      <UploadXlsBox />
+    </>
+  );
+
+  const hasSearch = activeTab !== "unenroll";
+
+  return (
+    <div>
+      <PageHeader eyebrow="Device Management" title="Device Settings" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
+        Layout only for now — nothing on this page is wired up yet.
+      </p>
+
+      <div style={{ ...S.tableCard, padding: 0, maxWidth: 640 }}>
+        <div style={{ display: "flex", borderBottom: "1px solid #E6E8EC", flexWrap: "wrap" }}>
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => switchTab(t.id)}
+              style={{
+                flex: "1 1 auto", padding: "12px 10px", fontSize: 12.5, fontWeight: 600, background: "transparent",
+                border: "none", borderBottom: activeTab === t.id ? "2px solid #F2A93C" : "2px solid transparent",
+                color: activeTab === t.id ? "#14161C" : "#9AA1AE", whiteSpace: "nowrap",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding: 24 }}>
+          {ChooseType}
+
+          {unitType === "bulk" ? (
+            BulkUpload
+          ) : (
+            <>
+              {activeTab === "enroll" && (
+                <>
+                  <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter IMEI (eg: 000111222333444)" /></Field>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", maxWidth: 360, margin: "6px 0 4px" }}>
+                    <span style={{ fontSize: 13, color: "#374151" }}>Lock immediately after activation</span>
+                    <ToggleSwitch checked={lockOnActivation} onChange={setLockOnActivation} />
+                  </div>
+                </>
+              )}
+              {activeTab === "expire" && (
+                <>
+                  <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
+                  <Field label="Expiration"><input style={S.input} type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} /></Field>
+                </>
+              )}
+              {activeTab === "restriction" && (
+                <Field label="Device Tag"><input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please enter device tag or enrolled IMEI" /></Field>
+              )}
+              {activeTab === "unenroll" && (
+                <Field label="IMEI"><input style={S.input} value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Please enter enrolled IMEI (eg: 000111222333444)" /></Field>
+              )}
+            </>
+          )}
+
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={S.primaryBtn}>Submit</button>
+            {hasSearch && <button style={S.secondaryBtn}>Search</button>}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
