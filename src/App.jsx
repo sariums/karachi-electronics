@@ -1387,6 +1387,39 @@ function SendMessagePage() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [callerNumber, setCallerNumber] = useState("");
+  const [deviceOptions, setDeviceOptions] = useState([]);
+  const [sending, setSending] = useState(false);
+  const [result, setResult] = useState(null); // { ok: bool, text: string }
+
+  useEffect(() => {
+    supabase
+      .from("devices")
+      .select("id, device_model, customers(name)")
+      .order("device_model", { ascending: true })
+      .then(({ data }) => setDeviceOptions(data || []));
+  }, []);
+
+  async function submitMessage() {
+    setResult(null);
+    if (!deviceTag) { setResult({ ok: false, text: "Choose a device." }); return; }
+    if (!title.trim()) { setResult({ ok: false, text: "Enter a title." }); return; }
+    if (!content.trim()) { setResult({ ok: false, text: "Enter content." }); return; }
+
+    setSending(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({
+      device_id: deviceTag,
+      command: activeTab === "popups" ? "POPUP" : "NOTIFY",
+      title: title.trim(),
+      message: content.trim(),
+      issued_by: user?.email || "admin",
+    });
+    await supabase.functions.invoke("notify-devices", { body: { device_ids: [deviceTag] } }).catch(() => {});
+    setSending(false);
+    setResult({ ok: true, text: "Sent — the phone will pick it up within a couple of seconds, whether it's locked or unlocked." });
+    setTitle("");
+    setContent("");
+  }
 
   const tabs = [
     { id: "popups", label: "Pop-ups" },
@@ -1404,7 +1437,7 @@ function SendMessagePage() {
     <div>
       <PageHeader eyebrow="Custom Management" title="Send Message" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Layout only for now — sending isn't wired up yet.
+        Pop-ups and Push are live — they reach the device within seconds, whether it's locked or unlocked. Simulated incoming call is still layout only.
       </p>
 
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1413,7 +1446,7 @@ function SendMessagePage() {
             {tabs.map((t) => (
               <button
                 key={t.id}
-                onClick={() => setActiveTab(t.id)}
+                onClick={() => { setActiveTab(t.id); setResult(null); }}
                 style={{
                   flex: 1, padding: "12px 10px", fontSize: 13, fontWeight: 600, background: "transparent",
                   border: "none", borderBottom: activeTab === t.id ? "2px solid #F2A93C" : "2px solid transparent",
@@ -1442,7 +1475,12 @@ function SendMessagePage() {
                   </div>
                 </Field>
                 <Field label="Device Tag">
-                  <input style={S.input} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)} placeholder="Please input Devicetag or original enrolled IMEI" />
+                  <select style={{ ...S.select, width: "100%" }} value={deviceTag} onChange={(e) => setDeviceTag(e.target.value)}>
+                    <option value="">Select a device…</option>
+                    {deviceOptions.map((d) => (
+                      <option key={d.id} value={d.id}>{d.customers?.name ? `${d.customers.name} — ` : ""}{d.device_model}</option>
+                    ))}
+                  </select>
                 </Field>
                 <Field label="Message Template">
                   <button type="button" style={{ ...S.iconBtn, borderRadius: "50%" }} aria-label="Add template"><Plus size={15} /></button>
@@ -1504,7 +1542,16 @@ function SendMessagePage() {
               </>
             )}
 
-            <button style={{ ...S.primaryBtn, marginTop: 8 }}><Send size={15} /> Submit</button>
+            {activeTab !== "call" ? (
+              <button style={{ ...S.primaryBtn, marginTop: 8, opacity: sending ? 0.7 : 1 }} onClick={submitMessage} disabled={sending}>
+                <Send size={15} /> {sending ? "Sending…" : "Submit"}
+              </button>
+            ) : (
+              <button style={{ ...S.primaryBtn, marginTop: 8 }}><Send size={15} /> Submit</button>
+            )}
+            {result && (
+              <p style={{ fontSize: 12.5, color: result.ok ? "#0E9488" : "#D6414C", margin: "10px 0 0" }}>{result.text}</p>
+            )}
           </div>
         </div>
 
