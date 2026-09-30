@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useContext, createContext } from "react";
 import {
-  Users, Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
+  Users, Smartphone, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
   ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming,
@@ -59,6 +59,10 @@ export default function App() {
     return () => listener.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    document.title = branding.name || "Karachi Electronics";
+  }, [branding.name]);
+
   if (!authChecked) return <div style={{ minHeight: "100vh", background: "#F5F6F8" }} />;
 
   const brandingValue = { ...branding, reload: loadBranding };
@@ -77,7 +81,6 @@ export default function App() {
             {tab === "devices" && <Devices />}
             {tab === "sendMessage" && <SendMessagePage />}
             {tab === "generalSettings" && <GeneralSettingsPage />}
-            {tab === "payments" && <Payments />}
             {tab === "roles" && <RolesList />}
             {tab === "accounts" && <AccountManagement />}
           </main>
@@ -211,7 +214,6 @@ function Sidebar({ tab, setTab }) {
         { id: "devices", label: "Devices", icon: Smartphone },
       ],
     },
-    { id: "payments", label: "Payments", icon: Wallet },
     {
       group: "Custom Management", icon: Sliders, items: [
         { id: "sendMessage", label: "Send Message", icon: Send },
