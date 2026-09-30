@@ -1070,6 +1070,12 @@ function DeviceSettingsPage() {
     { id: "unenroll", label: "Unenroll Device" },
   ];
 
+  const [expireBusy, setExpireBusy] = useState(false);
+  const [expireMsg, setExpireMsg] = useState("");
+  const [unenrollBusy, setUnenrollBusy] = useState(false);
+  const [unenrollMsg, setUnenrollMsg] = useState("");
+  const [unenrollConfirm, setUnenrollConfirm] = useState(null);
+
   function switchTab(id) {
     setActiveTab(id);
     setUnitType("single");
@@ -1078,6 +1084,9 @@ function DeviceSettingsPage() {
     setExpiration("");
     setLockOnActivation(true);
     setEnrollMsg("");
+    setExpireMsg("");
+    setUnenrollMsg("");
+    setUnenrollConfirm(null);
   }
 
   async function enrollDevice() {
@@ -1098,6 +1107,51 @@ function DeviceSettingsPage() {
       setEnrollMsg("Device enrolled.");
       setImei("");
     }
+  }
+
+  async function searchExpiration() {
+    const trimmed = deviceTag.trim();
+    if (!trimmed) { setExpireMsg("Enter a device tag or IMEI."); return; }
+    setExpireBusy(true);
+    setExpireMsg("");
+    const { data, error } = await supabase.from("devices").select("id, expires_at").eq("imei", trimmed).maybeSingle();
+    setExpireBusy(false);
+    if (error) { setExpireMsg(error.message); return; }
+    if (!data) { setExpireMsg("No device found with that IMEI."); return; }
+    setExpiration(data.expires_at || "");
+    setExpireMsg(data.expires_at ? `Current expiration: ${data.expires_at}` : "No expiration set yet for this device.");
+  }
+
+  async function submitExpiration() {
+    const trimmed = deviceTag.trim();
+    if (!trimmed) { setExpireMsg("Enter a device tag or IMEI."); return; }
+    if (!expiration) { setExpireMsg("Choose an expiration date."); return; }
+    setExpireBusy(true);
+    setExpireMsg("");
+    const { data, error } = await supabase.from("devices").update({ expires_at: expiration }).eq("imei", trimmed).select("id");
+    setExpireBusy(false);
+    if (error) { setExpireMsg(error.message); return; }
+    if (!data || data.length === 0) { setExpireMsg("No device found with that IMEI."); return; }
+    setExpireMsg("Expiration updated.");
+  }
+
+  async function findForUnenroll() {
+    const trimmed = imei.trim();
+    if (!trimmed) { setUnenrollMsg("Enter an IMEI."); return; }
+    setUnenrollBusy(true);
+    setUnenrollMsg("");
+    const { data, error } = await supabase.from("devices").select("id, device_model, imei").eq("imei", trimmed).maybeSingle();
+    setUnenrollBusy(false);
+    if (error) { setUnenrollMsg(error.message); return; }
+    if (!data) { setUnenrollMsg("No device found with that IMEI."); return; }
+    setUnenrollConfirm(data);
+  }
+
+  async function performUnenroll() {
+    await supabase.from("devices").delete().eq("id", unenrollConfirm.id);
+    setUnenrollConfirm(null);
+    setImei("");
+    setUnenrollMsg("Device unenrolled — fully removed from the app.");
   }
 
   const ChooseType = (
@@ -1128,13 +1182,11 @@ function DeviceSettingsPage() {
     </>
   );
 
-  const hasSearch = activeTab !== "unenroll" && activeTab !== "enroll";
-
   return (
     <div>
       <PageHeader eyebrow="Device Management" title="Device Settings" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Enroll Device is live — it adds the device the same way Devices → Add device does. The rest of this page is layout only for now.
+        Enroll Device, Update Device Expiration and Unenroll Device are live for single units — Unenroll fully removes the device from the app. Bulk units and Remove Phone Restriction are still layout only.
       </p>
 
       <div style={{ ...S.tableCard, padding: 0, maxWidth: 640 }}>
@@ -1191,20 +1243,57 @@ function DeviceSettingsPage() {
           )}
 
           <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            {activeTab === "enroll" ? (
+            {activeTab === "enroll" && (
               <button style={{ ...S.primaryBtn, opacity: enrolling ? 0.7 : 1 }} onClick={enrollDevice} disabled={enrolling}>
                 {enrolling ? "Submitting…" : "Submit"}
               </button>
-            ) : (
-              <button style={S.primaryBtn}>Submit</button>
             )}
-            {hasSearch && <button style={S.secondaryBtn}>Search</button>}
+
+            {activeTab === "expire" && unitType === "single" && (
+              <>
+                <button style={{ ...S.primaryBtn, opacity: expireBusy ? 0.7 : 1 }} onClick={submitExpiration} disabled={expireBusy}>
+                  {expireBusy ? "Submitting…" : "Submit"}
+                </button>
+                <button style={S.secondaryBtn} onClick={searchExpiration} disabled={expireBusy}>Search</button>
+              </>
+            )}
+            {activeTab === "expire" && unitType === "bulk" && <button style={S.primaryBtn}>Submit</button>}
+
+            {activeTab === "restriction" && (
+              <>
+                <button style={S.primaryBtn}>Submit</button>
+                <button style={S.secondaryBtn}>Search</button>
+              </>
+            )}
+
+            {activeTab === "unenroll" && unitType === "single" && (
+              <button style={{ ...S.primaryBtn, opacity: unenrollBusy ? 0.7 : 1 }} onClick={findForUnenroll} disabled={unenrollBusy}>
+                {unenrollBusy ? "Checking…" : "Submit"}
+              </button>
+            )}
+            {activeTab === "unenroll" && unitType === "bulk" && <button style={S.primaryBtn}>Submit</button>}
           </div>
+
           {activeTab === "enroll" && enrollMsg && (
             <p style={{ fontSize: 12, color: enrollMsg === "Device enrolled." ? "#1E8E5A" : "#D6414C", margin: "10px 0 0" }}>{enrollMsg}</p>
           )}
+          {activeTab === "expire" && expireMsg && (
+            <p style={{ fontSize: 12, color: expireMsg === "Expiration updated." ? "#1E8E5A" : "#D6414C", margin: "10px 0 0" }}>{expireMsg}</p>
+          )}
+          {activeTab === "unenroll" && unenrollMsg && (
+            <p style={{ fontSize: 12, color: unenrollMsg.startsWith("Device unenrolled") ? "#1E8E5A" : "#D6414C", margin: "10px 0 0" }}>{unenrollMsg}</p>
+          )}
         </div>
       </div>
+
+      {unenrollConfirm && (
+        <ConfirmDialog
+          title="Unenroll device"
+          message={`${unenrollConfirm.device_model || unenrollConfirm.imei} will be completely removed from the app — device, installment plans and payment history. This can't be undone.`}
+          onConfirm={performUnenroll}
+          onCancel={() => setUnenrollConfirm(null)}
+        />
+      )}
     </div>
   );
 }
