@@ -9,6 +9,10 @@ import { supabase } from "./supabaseClient";
 
 const money = (n) => `Rs ${Number(n || 0).toLocaleString()}`;
 
+// Total device licenses this installation is allowed to use. Fixed for now —
+// change this number if the license count changes.
+const TOTAL_DEVICE_LICENSES = 500;
+
 function initials(name) {
   return (name || "").split(" ").filter(Boolean).slice(0, 2).map((n) => n[0].toUpperCase()).join("");
 }
@@ -279,8 +283,14 @@ function Dashboard() {
   const [overdueList, setOverdueList] = useState([]);
   const [chartData, setChartData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [licenseWarningValue, setLicenseWarningValue] = useState(null);
 
-  useEffect(() => { load(); loadChartData(); }, []);
+  useEffect(() => {
+    load();
+    loadChartData();
+    supabase.from("app_branding").select("license_warning_value").eq("id", 1).maybeSingle()
+      .then(({ data }) => setLicenseWarningValue(data?.license_warning_value ?? null));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -340,14 +350,27 @@ function Dashboard() {
     setChartData(Object.keys(buckets).sort().map((key) => ({ date: key, ...buckets[key] })));
   }
 
+  const remainingLicenses = TOTAL_DEVICE_LICENSES - stats.devices;
+  const licenseWarning = !loading && licenseWarningValue != null && remainingLicenses <= licenseWarningValue;
+
   return (
     <div>
       <PageHeader eyebrow="Overview" title="Dashboard" />
+      {licenseWarning && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, background: "#FDEBEC", border: "1px solid #F4B7BC",
+          color: "#B0222D", fontSize: 13, borderRadius: 10, padding: "12px 16px", marginBottom: 20,
+        }}>
+          <Bell size={16} />
+          Only <strong>{Math.max(remainingLicenses, 0)}</strong> of {TOTAL_DEVICE_LICENSES} device licenses remaining. Add more licenses soon.
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 28 }}>
         <StatCard label="Total customers" value={stats.customers} />
         <StatCard label="Total devices" value={stats.devices} />
         <StatCard label="Locked now" value={stats.locked} accent="#D6414C" />
         <StatCard label="Overdue payments" value={stats.overdue} accent="#F2A93C" />
+        <StatCard label="Licenses remaining" value={`${Math.max(remainingLicenses, 0)} / ${TOTAL_DEVICE_LICENSES}`} accent={licenseWarning ? "#D6414C" : undefined} />
       </div>
 
       <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Activity — last 30 days</h3>
@@ -1682,6 +1705,37 @@ function GeneralSettingsPage() {
 
   useEffect(() => { setName(branding.name || ""); }, [branding.name]);
 
+  const [deviceCount, setDeviceCount] = useState(null);
+  const [warningValue, setWarningValue] = useState("");
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [savingLicense, setSavingLicense] = useState(false);
+  const [licenseMsg, setLicenseMsg] = useState("");
+
+  useEffect(() => {
+    supabase.from("devices").select("*", { count: "exact", head: true })
+      .then(({ count }) => setDeviceCount(count || 0));
+    supabase.from("app_branding").select("license_warning_value, license_notify_email").eq("id", 1).maybeSingle()
+      .then(({ data }) => {
+        setWarningValue(data?.license_warning_value != null ? String(data.license_warning_value) : "");
+        setNotifyEmail(data?.license_notify_email || "");
+      });
+  }, []);
+
+  const remainingLicenses = deviceCount == null ? null : TOTAL_DEVICE_LICENSES - deviceCount;
+  const warningNum = warningValue === "" ? null : Number(warningValue);
+  const licenseWarningActive = remainingLicenses != null && warningNum != null && remainingLicenses <= warningNum;
+
+  async function saveLicenseSettings() {
+    setSavingLicense(true);
+    setLicenseMsg("");
+    const { error } = await supabase.from("app_branding").update({
+      license_warning_value: warningValue === "" ? null : Number(warningValue),
+      license_notify_email: notifyEmail.trim() || null,
+    }).eq("id", 1);
+    setSavingLicense(false);
+    setLicenseMsg(error ? error.message : "Saved.");
+  }
+
   async function saveName() {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -1769,9 +1823,28 @@ function GeneralSettingsPage() {
           </Field>
         </SettingsCard>
 
-        <SettingsCard title="Available remaining amount warning value" description="When the remaining available licenses are lower than the set warning value, the system will automatically send an email notification.">
-          <Field label="Remaining license warning value"><input style={S.input} type="number" placeholder="3" /></Field>
-          <Field label="Notify recipients"><input style={S.input} placeholder="you@karachielectronics.pk" /></Field>
+        <SettingsCard title="Available remaining amount warning value" description={`This installation is licensed for ${TOTAL_DEVICE_LICENSES} devices. When the remaining amount drops to or below the value set here, a warning banner shows on the Dashboard.`}>
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center", background: licenseWarningActive ? "#FDEBEC" : "#F5F6F8",
+            border: `1px solid ${licenseWarningActive ? "#F4B7BC" : "#E6E8EC"}`, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13,
+          }}>
+            <span style={{ color: "#6B7280" }}>Used</span>
+            <strong style={{ color: licenseWarningActive ? "#B0222D" : "#14161C" }}>
+              {deviceCount == null ? "…" : `${deviceCount} / ${TOTAL_DEVICE_LICENSES}`}
+              {remainingLicenses != null && ` (${Math.max(remainingLicenses, 0)} remaining)`}
+            </strong>
+          </div>
+          <Field label="Remaining license warning value">
+            <input style={S.input} type="number" min="0" placeholder="3" value={warningValue} onChange={(e) => setWarningValue(e.target.value)} />
+          </Field>
+          <Field label="Notify recipients">
+            <input style={S.input} placeholder="you@karachielectronics.pk" value={notifyEmail} onChange={(e) => setNotifyEmail(e.target.value)} />
+            <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>Saved for now — email sending isn't wired up yet, only the Dashboard banner is live.</p>
+          </Field>
+          <button type="button" style={{ ...S.primaryBtn, opacity: savingLicense ? 0.7 : 1 }} onClick={saveLicenseSettings} disabled={savingLicense}>
+            {savingLicense ? "Saving…" : "Save"}
+          </button>
+          {licenseMsg && <p style={{ fontSize: 11.5, color: licenseMsg === "Saved." ? "#1E8E5A" : "#D6414C", margin: "8px 0 0" }}>{licenseMsg}</p>}
         </SettingsCard>
 
         <SettingsCard
