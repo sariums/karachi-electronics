@@ -41,6 +41,7 @@ export default function App() {
   const [profileChecked, setProfileChecked] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [deviceSettingsTab, setDeviceSettingsTab] = useState("enroll");
+  const [sendMessageDeviceId, setSendMessageDeviceId] = useState(null);
   const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
   const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0 });
   const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
@@ -135,9 +136,16 @@ export default function App() {
             <Sidebar tab={tab} setTab={setTab} />
             <main style={S.main}>
               {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
-              {tab === "devices" && <Devices />}
+              {tab === "devices" && (
+                <Devices
+                  onSendMessage={(deviceId) => {
+                    setSendMessageDeviceId(deviceId);
+                    setTab("sendMessage");
+                  }}
+                />
+              )}
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
-              {tab === "sendMessage" && <SendMessagePage />}
+              {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
               {tab === "roles" && <RolesList />}
               {tab === "accounts" && <AccountManagement />}
@@ -292,7 +300,7 @@ function Sidebar({ tab, setTab }) {
     },
     {
       group: "Custom Management", tourKey: "nav-custom-management", icon: Sliders, items: [
-        { id: "sendMessage", label: "Send Message", icon: Send },
+        { id: "sendMessage", label: "Notifications", icon: Send },
         { id: "generalSettings", label: "General Settings", icon: Settings },
       ],
     },
@@ -572,13 +580,12 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
 
 /* ---------------- DEVICES ---------------- */
 
-function Devices() {
+function Devices({ onSendMessage }) {
   const { branchId, deviceLicenseLimit } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editDraft, setEditDraft] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
-  const [notifyDraft, setNotifyDraft] = useState(null);
   const [sending, setSending] = useState(false);
   const [historyDraft, setHistoryDraft] = useState(null);
   const [codeDialog, setCodeDialog] = useState(null);
@@ -800,24 +807,6 @@ function Devices() {
   async function toggleAppWhitelist(app, checked) {
     setAppsDraft((prev) => (prev ? { ...prev, apps: prev.apps.map((a) => (a.id === app.id ? { ...a, is_whitelisted: checked } : a)) } : prev));
     await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
-  }
-
-  function openNotify(d) { setNotifyDraft({ device: d, message: "" }); setError(""); }
-
-  async function sendNotify() {
-    if (!notifyDraft.message.trim()) { setError("Enter a message."); return; }
-    setSending(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("device_commands").insert({
-      device_id: notifyDraft.device.id,
-      command: "NOTIFY",
-      message: notifyDraft.message.trim(),
-      issued_by: user?.email || "admin",
-    });
-    await supabase.functions.invoke("notify-devices", { body: { device_ids: [notifyDraft.device.id] } }).catch(() => {});
-    setSending(false);
-    setNotifyDraft(null);
-    load();
   }
 
   function openPushCall(d) { setCallDraft({ device: d, caller_number: "", message: "" }); setError(""); }
@@ -1066,7 +1055,7 @@ function Devices() {
                           <LockIcon size={13} /> Lock
                         </button>
                       )}
-                      <button style={S.iconBtn} onClick={() => openNotify(d)} aria-label="Send notification"><Bell size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => onSendMessage(d.id)} aria-label="Send notification"><Bell size={15} /></button>
                       <button style={S.iconBtn} onClick={() => openPushCall(d)} aria-label="Push call"><PhoneCall size={15} /></button>
                       <button style={S.iconBtn} onClick={() => startAudioCall(d)} aria-label="Audio call"><Mic size={15} /></button>
                       <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
@@ -1084,25 +1073,6 @@ function Devices() {
           </tbody>
         </table>
       </div>
-
-      {notifyDraft && (
-        <Drawer title={`Notify ${(notifyDraft.device.device_model || notifyDraft.device.imei)}`} onClose={() => setNotifyDraft(null)}>
-          <Field label="Message" error={error}>
-            <textarea
-              style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
-              value={notifyDraft.message}
-              onChange={(e) => setNotifyDraft({ ...notifyDraft, message: e.target.value })}
-              placeholder="e.g. Your payment of Rs 10,000 is due tomorrow."
-            />
-          </Field>
-          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            <button style={{ ...S.primaryBtn, opacity: sending ? 0.7 : 1 }} onClick={sendNotify} disabled={sending}>
-              {sending ? "Sending…" : "Send notification"}
-            </button>
-            <button style={S.secondaryBtn} onClick={() => setNotifyDraft(null)}>Cancel</button>
-          </div>
-        </Drawer>
-      )}
 
       {callDraft && (
         <Drawer title={`Push call · ${(callDraft.device.device_model || callDraft.device.imei)}`} onClose={() => setCallDraft(null)}>
@@ -1753,10 +1723,10 @@ function Payments() {
 
 /* ---------------- SEND MESSAGE (UI only, wiring later) ---------------- */
 
-function SendMessagePage() {
+function SendMessagePage({ initialDeviceId }) {
   const [activeTab, setActiveTab] = useState("popups");
   const [sendType, setSendType] = useState("single");
-  const [deviceTag, setDeviceTag] = useState("");
+  const [deviceTag, setDeviceTag] = useState(initialDeviceId || "");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [callerNumber, setCallerNumber] = useState("");
@@ -1808,7 +1778,7 @@ function SendMessagePage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Custom Management" title="Send Message" />
+      <PageHeader eyebrow="Custom Management" title="Notifications" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
         Pop-ups and Push are live — they reach the device within seconds, whether it's locked or unlocked. Simulated incoming call is still layout only.
       </p>
