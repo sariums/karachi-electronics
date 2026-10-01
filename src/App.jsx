@@ -1043,7 +1043,6 @@ function Devices({ onSendMessage }) {
                         <button style={actionBtn} onClick={() => resetUnlockCode(d)}>Reset Code</button>
                         <button style={actionBtn} onClick={() => openHistory(d)}>Activity</button>
                         <button style={actionBtn} onClick={() => openApps(d)}>Allowed Apps</button>
-                        <button style={actionBtn} onClick={() => openPlans(d)}>Installment Plans</button>
                         <button style={actionBtn} onClick={() => openEdit(d)}>Edit</button>
                         <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => setConfirmDelete(d)}>Delete</button>
                       </div>
