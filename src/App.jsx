@@ -72,20 +72,33 @@ export default function App() {
     }
   }
 
+  const loadedUserIdRef = useRef(null);
+
+  function loadProfileOnce(userId) {
+    // Supabase's auth listener can fire more than once for the same login — on
+    // routine token refreshes, and again from cross-tab sync when another tab
+    // open to this app refreshes its session via localStorage. Each extra fire
+    // used to restart loadProfile (which resets profileChecked to false first),
+    // and if two calls overlapped the page could get stuck showing the loading
+    // screen forever even though the data had already loaded. Only load once
+    // per distinct signed-in user id, no matter how many times we're told.
+    if (loadedUserIdRef.current === userId) return;
+    loadedUserIdRef.current = userId;
+    loadProfile(userId);
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setAuthChecked(true);
-      if (data.session) loadProfile(data.session.user.id);
+      if (data.session) loadProfileOnce(data.session.user.id);
     });
-    // Only react to real sign-in/sign-out events here — getSession() above already
-    // handles the initial load, and Supabase also fires this listener on routine
-    // token refreshes (e.g. when the tab regains focus). Reloading the profile on
-    // every refresh would flip profileChecked back to false and re-blank the app.
     const { data: listener } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess);
-      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
-        if (sess) loadProfile(sess.user.id);
+      if (event === "SIGNED_OUT") {
+        loadedUserIdRef.current = null;
+      } else if (sess) {
+        loadProfileOnce(sess.user.id);
       }
     });
     return () => listener.subscription.unsubscribe();
