@@ -43,6 +43,7 @@ export default function App() {
   const [deviceSettingsTab, setDeviceSettingsTab] = useState("enroll");
   const [sendMessageDeviceId, setSendMessageDeviceId] = useState(null);
   const [sendMessageTab, setSendMessageTab] = useState("popups");
+  const [sendMessageImei, setSendMessageImei] = useState("");
   const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
   const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0 });
   const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
@@ -139,15 +140,16 @@ export default function App() {
               {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
               {tab === "devices" && (
                 <Devices
-                  onSendMessage={(deviceId, msgTab) => {
+                  onSendMessage={(deviceId, msgTab, deviceImei) => {
                     setSendMessageDeviceId(deviceId);
                     setSendMessageTab(msgTab || "popups");
+                    setSendMessageImei(deviceImei || "");
                     setTab("sendMessage");
                   }}
                 />
               )}
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
-              {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} />}
+              {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} initialImei={sendMessageImei} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
               {tab === "roles" && <RolesList />}
               {tab === "accounts" && <AccountManagement />}
@@ -1037,7 +1039,7 @@ function Devices({ onSendMessage }) {
                           <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => sendCommand(d, "LOCK")}>Lock</button>
                         )}
                         <button style={actionBtn} onClick={() => onSendMessage(d.id)}>Notifications</button>
-                        <button style={actionBtn} onClick={() => onSendMessage(d.id, "call")}>Push Call</button>
+                        <button style={actionBtn} onClick={() => onSendMessage(d.id, "call", d.imei)}>Push Call</button>
                         <button style={actionBtn} onClick={() => startAudioCall(d)}>Audio Call</button>
                         <button style={actionBtn} onClick={() => showCode(d)}>Unlock Code</button>
                         <button style={actionBtn} onClick={() => resetUnlockCode(d)}>Reset Code</button>
@@ -1674,13 +1676,15 @@ function Payments() {
 
 /* ---------------- SEND MESSAGE (UI only, wiring later) ---------------- */
 
-function SendMessagePage({ initialDeviceId, initialTab }) {
+function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
   const [activeTab, setActiveTab] = useState(initialTab || "popups");
   const [sendType, setSendType] = useState("single");
   const [deviceTag, setDeviceTag] = useState(initialDeviceId || "");
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  const [callerNumber, setCallerNumber] = useState("");
+  const [callImei, setCallImei] = useState(initialImei || "");
+  const [callText, setCallText] = useState("");
+  const [callAudioFile, setCallAudioFile] = useState(null);
   const [deviceOptions, setDeviceOptions] = useState([]);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null); // { ok: bool, text: string }
@@ -1715,23 +1719,69 @@ function SendMessagePage({ initialDeviceId, initialTab }) {
     setContent("");
   }
 
+  async function submitCall() {
+    setResult(null);
+    if (!callImei.trim()) { setResult({ ok: false, text: "Enter the device IMEI." }); return; }
+    if (!callText.trim() && !callAudioFile) { setResult({ ok: false, text: "Write a message or upload an audio file." }); return; }
+
+    setSending(true);
+    const { data: device, error: lookupErr } = await supabase
+      .from("devices")
+      .select("id")
+      .eq("imei", callImei.trim())
+      .maybeSingle();
+    if (lookupErr || !device) {
+      setSending(false);
+      setResult({ ok: false, text: "No device found with that IMEI." });
+      return;
+    }
+
+    let audioUrl = null;
+    if (callAudioFile) {
+      const ext = (callAudioFile.name.split(".").pop() || "amr").toLowerCase();
+      const path = `call-${device.id}-${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage.from("call-audio").upload(path, callAudioFile, { upsert: true });
+      if (upErr) {
+        setSending(false);
+        setResult({ ok: false, text: upErr.message });
+        return;
+      }
+      const { data: pub } = supabase.storage.from("call-audio").getPublicUrl(path);
+      audioUrl = pub.publicUrl;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({
+      device_id: device.id,
+      command: "PUSH_CALL",
+      message: callText.trim() || null,
+      audio_url: audioUrl,
+      issued_by: user?.email || "admin",
+    });
+    await supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+    setSending(false);
+    setResult({ ok: true, text: "Call sent — the phone will pick it up within a couple of seconds." });
+    setCallText("");
+    setCallAudioFile(null);
+  }
+
   const tabs = [
     { id: "popups", label: "Pop-ups" },
     { id: "push", label: "Push" },
-    { id: "call", label: "Simulated incoming call" },
+    { id: "call", label: "Simulated Push Call" },
   ];
 
   const tabCopy = {
     popups: { title: "Pop-ups", desc: "The pop-up window will appear in the phone. You can set Title and content." },
     push: { title: "Push", desc: "Sending off notification messages." },
-    call: { title: "Simulated incoming call", desc: "A simulated incoming call screen will appear on the user's phone. The user will hear a recording after clicking accept." },
+    call: { title: "Simulated Push Call", desc: "Shows a simulated incoming call on the phone by IMEI. If you upload an audio file it plays on accept; otherwise your written message is read out loud." },
   };
 
   return (
     <div>
       <PageHeader eyebrow="Custom Management" title="Notifications" />
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-        Pop-ups and Push are live — they reach the device within seconds, whether it's locked or unlocked. Simulated incoming call is still layout only.
+        All three are live — they reach the device within seconds, whether it's locked or unlocked.
       </p>
 
       <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -1797,41 +1847,31 @@ function SendMessagePage({ initialDeviceId, initialTab }) {
               </>
             ) : (
               <>
-                <div style={{ ...S.tableCard, marginBottom: 20 }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead><tr>{["", "Number", "Audio Recording Name", "Operation"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-                    <tbody>
-                      {[0, 1, 2, 3].map((n) => (
-                        <tr key={n} style={S.tr}>
-                          <td style={S.td}><input type="checkbox" /></td>
-                          <td style={S.td} className="mono">{n}</td>
-                          <td style={S.td}>{n === 0 ? "Recording.amr" : ""}</td>
-                          <td style={{ ...S.td, display: "flex", gap: 8 }}>
-                            <button type="button" style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
-                              <Copy size={12} /> Copy URL
-                            </button>
-                            <button type="button" style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 5 }}>
-                              <Upload size={12} /> Upload
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "-14px 0 20px" }}>AMR format only. Files must not exceed 100kb.</p>
-
-                <Field label="Choose number">
-                  <input style={S.input} value={callerNumber} onChange={(e) => setCallerNumber(e.target.value)} placeholder="Please enter the displayed number" />
+                <Field label="Device IMEI">
+                  <input style={S.input} className="mono" value={callImei} onChange={(e) => setCallImei(e.target.value)} placeholder="Enter the device's IMEI" />
                 </Field>
-                <Field label="Device Tag">
+                <Field label="Message to speak">
+                  <textarea
+                    style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
+                    value={callText}
+                    onChange={(e) => setCallText(e.target.value)}
+                    placeholder="e.g. This is a reminder from Karachi Electronics. Your installment payment is overdue."
+                  />
+                </Field>
+                <Field label="Or upload audio">
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <button type="button" style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <Upload size={14} /> Upload
-                    </button>
-                    <a href="#" onClick={(e) => e.preventDefault()} style={{ fontSize: 12.5, color: "#F2A93C" }}>Template download</a>
+                    <label style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                      <Upload size={14} /> {callAudioFile ? "Change file" : "Choose file"}
+                      <input
+                        type="file"
+                        accept="audio/*"
+                        style={{ display: "none" }}
+                        onChange={(e) => setCallAudioFile(e.target.files?.[0] || null)}
+                      />
+                    </label>
+                    {callAudioFile && <span style={{ fontSize: 12.5, color: "#374151" }}>{callAudioFile.name}</span>}
                   </div>
-                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>Only .xls files can be uploaded. Maximum 2,000 devices per upload.</p>
+                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>If both are filled, the audio plays instead of the spoken message.</p>
                 </Field>
               </>
             )}
@@ -1841,7 +1881,9 @@ function SendMessagePage({ initialDeviceId, initialTab }) {
                 <Send size={15} /> {sending ? "Sending…" : "Submit"}
               </button>
             ) : (
-              <button style={{ ...S.primaryBtn, marginTop: 8 }}><Send size={15} /> Submit</button>
+              <button style={{ ...S.primaryBtn, marginTop: 8, opacity: sending ? 0.7 : 1 }} onClick={submitCall} disabled={sending}>
+                <Send size={15} /> {sending ? "Sending…" : "Submit"}
+              </button>
             )}
             {result && (
               <p style={{ fontSize: 12.5, color: result.ok ? "#0E9488" : "#D6414C", margin: "10px 0 0" }}>{result.text}</p>
@@ -1849,7 +1891,7 @@ function SendMessagePage({ initialDeviceId, initialTab }) {
           </div>
         </div>
 
-        <PhonePreview variant={activeTab} title={title} content={content} number={callerNumber} />
+        <PhonePreview variant={activeTab} title={title} content={content} number={callImei} />
       </div>
     </div>
   );
