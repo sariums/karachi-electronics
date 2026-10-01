@@ -2614,6 +2614,8 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
   const [creating, setCreating] = useState(false);
   const [editLimit, setEditLimit] = useState(null); // { id, value }
   const [savingLimit, setSavingLimit] = useState(false);
+  const [editName, setEditName] = useState(null); // { id, value }
+  const [savingName, setSavingName] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -2675,6 +2677,15 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     load();
   }
 
+  async function saveName() {
+    if (!editName || !editName.value.trim()) return;
+    setSavingName(true);
+    await supabase.from("branches").update({ name: editName.value.trim() }).eq("id", editName.id);
+    setSavingName(false);
+    setEditName(null);
+    load();
+  }
+
   return (
     <div style={S.appShell}>
       <GlobalStyle />
@@ -2714,9 +2725,26 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
                 const used = deviceCounts[b.id] || 0;
                 const remaining = Math.max(b.device_license_limit - used, 0);
                 const editing = editLimit?.id === b.id;
+                const editingName = editName?.id === b.id;
                 return (
                   <tr key={b.id} style={S.tr}>
-                    <td style={S.td}>{b.name}</td>
+                    <td style={S.td}>
+                      {editingName ? (
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            style={{ ...S.input, width: 160, padding: "6px 10px" }}
+                            value={editName.value}
+                            onChange={(e) => setEditName({ ...editName, value: e.target.value })}
+                          />
+                          <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveName} disabled={savingName}>Save</button>
+                          <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditName(null)}>Cancel</button>
+                        </div>
+                      ) : (
+                        <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditName({ id: b.id, value: b.name })}>
+                          {b.name} <Pencil size={12} color="#9AA1AE" />
+                        </span>
+                      )}
+                    </td>
                     <td style={S.td}>
                       {editing ? (
                         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
