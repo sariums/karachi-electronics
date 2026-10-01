@@ -457,13 +457,13 @@ function Devices() {
   }
 
   async function addDevice() {
-    if (!addDeviceDraft.device_model.trim()) { setError("Enter a device model."); return; }
+    if (!(addDeviceDraft.device_model || "").trim()) { setError("Enter a device model."); return; }
     setError("");
     const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
     await supabase.from("devices").insert({
       device_model: addDeviceDraft.device_model.trim(),
-      imei: addDeviceDraft.imei.trim() || null,
-      device_tag: addDeviceDraft.device_tag.trim() || null,
+      imei: (addDeviceDraft.imei || "").trim() || null,
+      device_tag: (addDeviceDraft.device_tag || "").trim() || null,
       unlock_pin,
       unlock_pin_generated_at: new Date().toISOString(),
     });
@@ -813,7 +813,7 @@ function Devices() {
   return (
     <div>
       <PageHeader eyebrow="Fleet" title="Devices" count={devices.length}>
-        <button style={S.primaryBtn} onClick={() => { setAddDeviceDraft({ device_model: "", imei: "" }); setError(""); setAddDeviceOpen(true); }}>
+        <button style={S.primaryBtn} onClick={() => { setAddDeviceDraft({ device_model: "", imei: "", device_tag: "" }); setError(""); setAddDeviceOpen(true); }}>
           <Plus size={16} /> Add device
         </button>
       </PageHeader>
