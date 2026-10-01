@@ -1002,53 +1002,54 @@ function Devices({ onSendMessage }) {
 
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Device", "Tag", "IMEI", "Status", "Last seen", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Device", "Tag", "IMEI", "Status", "Last seen"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={6} style={S.emptyCell}>Loading…</td></tr>}
-            {!loading && devices.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No devices yet.</td></tr>}
-            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No devices match these filters.</td></tr>}
+            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && devices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices yet.</td></tr>}
+            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices match these filters.</td></tr>}
             {filteredDevices.map((d) => {
               const lastCmd = d.device_commands?.sort((a, b) => new Date(b.issued_at) - new Date(a.issued_at))[0];
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
+              const actionBtn = { ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 };
               return (
-                <tr key={d.id} style={S.tr}>
-                  <td style={S.td}>{d.device_model || d.imei || "—"}</td>
-                  <td style={S.td}>{d.device_tag || "—"}</td>
-                  <td style={S.td} className="mono">{d.imei || "—"}</td>
-                  <td style={S.td}>
-                    <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
-                      {d.is_locked ? "Locked" : "Active"}
-                    </span>
-                    {d.sim_missing && (
-                      <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>No SIM</span>
-                    )}
-                    {pendingAck && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
-                  </td>
-                  <td style={S.td} className="mono">{d.last_seen_at ? new Date(d.last_seen_at).toLocaleDateString() : "never"}</td>
-                  <td style={{ ...S.td, textAlign: "right" }}>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      {d.is_locked ? (
-                        <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => sendCommand(d, "UNLOCK")}>
-                          <Unlock size={13} /> Unlock
-                        </button>
-                      ) : (
-                        <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => sendCommand(d, "LOCK")}>
-                          <LockIcon size={13} /> Lock
-                        </button>
+                <React.Fragment key={d.id}>
+                  <tr style={{ borderBottom: "none" }}>
+                    <td style={S.td}>{d.device_model || d.imei || "—"}</td>
+                    <td style={S.td}>{d.device_tag || "—"}</td>
+                    <td style={S.td} className="mono">{d.imei || "—"}</td>
+                    <td style={S.td}>
+                      <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
+                        {d.is_locked ? "Locked" : "Active"}
+                      </span>
+                      {d.sim_missing && (
+                        <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>No SIM</span>
                       )}
-                      <button style={S.iconBtn} onClick={() => onSendMessage(d.id)} aria-label="Send notification"><Bell size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => onSendMessage(d.id, "call")} aria-label="Push call"><PhoneCall size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => startAudioCall(d)} aria-label="Audio call"><Mic size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => resetUnlockCode(d)} aria-label="Reset unlock code"><RefreshCw size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => openHistory(d)} aria-label="Activity history"><History size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => openApps(d)} aria-label="Allowed apps"><LayoutGrid size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => openPlans(d)} aria-label="Installment plans"><Wallet size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => openEdit(d)} aria-label="Edit"><Pencil size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => setConfirmDelete(d)} aria-label="Delete"><Trash2 size={15} color="#D6414C" /></button>
-                    </div>
-                  </td>
-                </tr>
+                      {pendingAck && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
+                    </td>
+                    <td style={S.td} className="mono">{d.last_seen_at ? new Date(d.last_seen_at).toLocaleDateString() : "never"}</td>
+                  </tr>
+                  <tr style={S.tr}>
+                    <td colSpan={5} style={{ ...S.td, background: "#FAFBFC", padding: "10px 16px 14px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {d.is_locked ? (
+                          <button style={actionBtn} onClick={() => sendCommand(d, "UNLOCK")}>Unlock</button>
+                        ) : (
+                          <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => sendCommand(d, "LOCK")}>Lock</button>
+                        )}
+                        <button style={actionBtn} onClick={() => onSendMessage(d.id)}>Notifications</button>
+                        <button style={actionBtn} onClick={() => onSendMessage(d.id, "call")}>Push Call</button>
+                        <button style={actionBtn} onClick={() => startAudioCall(d)}>Audio Call</button>
+                        <button style={actionBtn} onClick={() => showCode(d)}>Unlock Code</button>
+                        <button style={actionBtn} onClick={() => resetUnlockCode(d)}>Reset Code</button>
+                        <button style={actionBtn} onClick={() => openHistory(d)}>Activity</button>
+                        <button style={actionBtn} onClick={() => openApps(d)}>Allowed Apps</button>
+                        <button style={actionBtn} onClick={() => openPlans(d)}>Installment Plans</button>
+                        <button style={actionBtn} onClick={() => openEdit(d)}>Edit</button>
+                        <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => setConfirmDelete(d)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                </React.Fragment>
               );
             })}
           </tbody>
