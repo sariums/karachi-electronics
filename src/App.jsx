@@ -42,6 +42,7 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [deviceSettingsTab, setDeviceSettingsTab] = useState("enroll");
   const [sendMessageDeviceId, setSendMessageDeviceId] = useState(null);
+  const [sendMessageTab, setSendMessageTab] = useState("popups");
   const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
   const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0 });
   const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
@@ -138,14 +139,15 @@ export default function App() {
               {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
               {tab === "devices" && (
                 <Devices
-                  onSendMessage={(deviceId) => {
+                  onSendMessage={(deviceId, msgTab) => {
                     setSendMessageDeviceId(deviceId);
+                    setSendMessageTab(msgTab || "popups");
                     setTab("sendMessage");
                   }}
                 />
               )}
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
-              {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} />}
+              {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
               {tab === "roles" && <RolesList />}
               {tab === "accounts" && <AccountManagement />}
@@ -590,7 +592,6 @@ function Devices({ onSendMessage }) {
   const [historyDraft, setHistoryDraft] = useState(null);
   const [codeDialog, setCodeDialog] = useState(null);
   const [appsDraft, setAppsDraft] = useState(null);
-  const [callDraft, setCallDraft] = useState(null);
   const [audioCall, setAudioCall] = useState(null); // { device, status: 'connecting' | 'ringing' | 'connected' | 'failed', errorMsg }
   const pcRef = useRef(null);
   const channelRef = useRef(null);
@@ -807,26 +808,6 @@ function Devices({ onSendMessage }) {
   async function toggleAppWhitelist(app, checked) {
     setAppsDraft((prev) => (prev ? { ...prev, apps: prev.apps.map((a) => (a.id === app.id ? { ...a, is_whitelisted: checked } : a)) } : prev));
     await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
-  }
-
-  function openPushCall(d) { setCallDraft({ device: d, caller_number: "", message: "" }); setError(""); }
-
-  async function sendPushCall() {
-    if (!callDraft.caller_number.trim()) { setError("Enter a caller number."); return; }
-    if (!callDraft.message.trim()) { setError("Enter a message to speak."); return; }
-    setSending(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("device_commands").insert({
-      device_id: callDraft.device.id,
-      command: "PUSH_CALL",
-      caller_number: callDraft.caller_number.trim(),
-      message: callDraft.message.trim(),
-      issued_by: user?.email || "admin",
-    });
-    await supabase.functions.invoke("notify-devices", { body: { device_ids: [callDraft.device.id] } }).catch(() => {});
-    setSending(false);
-    setCallDraft(null);
-    load();
   }
 
   function endAudioCall() {
@@ -1056,7 +1037,7 @@ function Devices({ onSendMessage }) {
                         </button>
                       )}
                       <button style={S.iconBtn} onClick={() => onSendMessage(d.id)} aria-label="Send notification"><Bell size={15} /></button>
-                      <button style={S.iconBtn} onClick={() => openPushCall(d)} aria-label="Push call"><PhoneCall size={15} /></button>
+                      <button style={S.iconBtn} onClick={() => onSendMessage(d.id, "call")} aria-label="Push call"><PhoneCall size={15} /></button>
                       <button style={S.iconBtn} onClick={() => startAudioCall(d)} aria-label="Audio call"><Mic size={15} /></button>
                       <button style={S.iconBtn} onClick={() => showCode(d)} aria-label="Show unlock code"><KeyRound size={15} /></button>
                       <button style={S.iconBtn} onClick={() => resetUnlockCode(d)} aria-label="Reset unlock code"><RefreshCw size={15} /></button>
@@ -1073,36 +1054,6 @@ function Devices({ onSendMessage }) {
           </tbody>
         </table>
       </div>
-
-      {callDraft && (
-        <Drawer title={`Push call · ${(callDraft.device.device_model || callDraft.device.imei)}`} onClose={() => setCallDraft(null)}>
-          <p style={{ fontSize: 12.5, color: "#6B7280", margin: "-8px 0 20px", lineHeight: 1.6 }}>
-            Shows a simulated incoming call on the phone. On Answer, the message below is spoken aloud via on-device text-to-speech — not a real phone call.
-          </p>
-          <Field label="Caller number to display" error={error === "Enter a caller number." ? error : undefined}>
-            <input
-              style={S.input}
-              value={callDraft.caller_number}
-              onChange={(e) => setCallDraft({ ...callDraft, caller_number: e.target.value })}
-              placeholder="021-1122334"
-            />
-          </Field>
-          <Field label="Message to speak" error={error === "Enter a message to speak." ? error : undefined}>
-            <textarea
-              style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
-              value={callDraft.message}
-              onChange={(e) => setCallDraft({ ...callDraft, message: e.target.value })}
-              placeholder="e.g. This is a reminder from Karachi Electronics. Your installment payment is overdue. Please visit or call the store to clear your due amount."
-            />
-          </Field>
-          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
-            <button style={{ ...S.primaryBtn, opacity: sending ? 0.7 : 1 }} onClick={sendPushCall} disabled={sending}>
-              {sending ? "Sending…" : "Push call"}
-            </button>
-            <button style={S.secondaryBtn} onClick={() => setCallDraft(null)}>Cancel</button>
-          </div>
-        </Drawer>
-      )}
 
       {audioCall && (
         <div style={S.overlay}>
@@ -1723,8 +1674,8 @@ function Payments() {
 
 /* ---------------- SEND MESSAGE (UI only, wiring later) ---------------- */
 
-function SendMessagePage({ initialDeviceId }) {
-  const [activeTab, setActiveTab] = useState("popups");
+function SendMessagePage({ initialDeviceId, initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || "popups");
   const [sendType, setSendType] = useState("single");
   const [deviceTag, setDeviceTag] = useState(initialDeviceId || "");
   const [title, setTitle] = useState("");
