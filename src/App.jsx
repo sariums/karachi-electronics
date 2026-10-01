@@ -47,26 +47,29 @@ export default function App() {
 
   async function loadProfile(userId) {
     setProfileChecked(false);
-    const { data: adminRow } = await supabase.from("admin_users").select("branch_id, is_super_admin").eq("id", userId).maybeSingle();
-    const isSuperAdmin = !!adminRow?.is_super_admin;
-    const branchId = adminRow?.branch_id || null;
+    try {
+      const { data: adminRow } = await supabase.from("admin_users").select("branch_id, is_super_admin").eq("id", userId).maybeSingle();
+      const isSuperAdmin = !!adminRow?.is_super_admin;
+      const branchId = adminRow?.branch_id || null;
 
-    let branchName = "";
-    let deviceLicenseLimit = 0;
-    if (branchId) {
-      const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit").eq("id", branchId).maybeSingle();
-      branchName = branchRow?.name || "";
-      deviceLicenseLimit = branchRow?.device_license_limit || 0;
+      let branchName = "";
+      let deviceLicenseLimit = 0;
+      if (branchId) {
+        const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit").eq("id", branchId).maybeSingle();
+        branchName = branchRow?.name || "";
+        deviceLicenseLimit = branchRow?.device_license_limit || 0;
+      }
+
+      setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit });
+      setAppMode(branchId ? "branch" : "super");
+
+      if (branchId) {
+        const { data: brandingRow } = await supabase.from("app_branding").select("name, icon_url").eq("branch_id", branchId).maybeSingle();
+        if (brandingRow) setBranding({ name: brandingRow.name || "Northline", iconUrl: brandingRow.icon_url || null });
+      }
+    } finally {
+      setProfileChecked(true);
     }
-
-    setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit });
-    setAppMode(branchId ? "branch" : "super");
-
-    if (branchId) {
-      const { data: brandingRow } = await supabase.from("app_branding").select("name, icon_url").eq("branch_id", branchId).maybeSingle();
-      if (brandingRow) setBranding({ name: brandingRow.name || "Northline", iconUrl: brandingRow.icon_url || null });
-    }
-    setProfileChecked(true);
   }
 
   useEffect(() => {
@@ -75,9 +78,15 @@ export default function App() {
       setAuthChecked(true);
       if (data.session) loadProfile(data.session.user.id);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, sess) => {
+    // Only react to real sign-in/sign-out events here — getSession() above already
+    // handles the initial load, and Supabase also fires this listener on routine
+    // token refreshes (e.g. when the tab regains focus). Reloading the profile on
+    // every refresh would flip profileChecked back to false and re-blank the app.
+    const { data: listener } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess);
-      if (sess) loadProfile(sess.user.id);
+      if (event === "SIGNED_IN" || event === "SIGNED_OUT") {
+        if (sess) loadProfile(sess.user.id);
+      }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
