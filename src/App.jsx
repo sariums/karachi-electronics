@@ -130,7 +130,7 @@ export default function App() {
       <BranchContext.Provider value={branchValue}>
         <div style={S.appShell}>
           <GlobalStyle />
-          <TopBar email={session.user.email} onSwitchToSuperAdmin={() => setAppMode("super")} />
+          <TopBar email={session.user.email} onSwitchToSuperAdmin={() => setAppMode("super")} setTab={setTab} />
           <div style={S.appBody}>
             <Sidebar tab={tab} setTab={setTab} />
             <main style={S.main}>
@@ -157,32 +157,47 @@ function BrandLogo({ size = 28 }) {
   return <div style={{ ...S.logoMark, width: size, height: size }}>{(name || "N").charAt(0).toUpperCase()}</div>;
 }
 
-function TopBar({ email, onSwitchToSuperAdmin }) {
+function TopBar({ email, onSwitchToSuperAdmin, setTab }) {
   const { name } = useContext(BrandingContext);
   const { isSuperAdmin, branchName } = useContext(BranchContext);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  const steps = [
+    { target: "[data-tour='brand']", title: "Welcome", text: "This quick tour walks you through your branch admin panel." },
+    { target: "[data-tour='help']", title: "Help", text: "Click here anytime if you need help." },
+    { target: "[data-tour='account']", title: "Your account", text: "Your signed-in email shows here. Sign out anytime with Log out." },
+    ...(isSuperAdmin ? [{ target: "[data-tour='switch-super']", title: "Super Admin", text: "You're also a super admin — switch here to manage every branch and its license limit." }] : []),
+    { target: "[data-tour='dashboard-stats']", tab: "dashboard", title: "Dashboard", text: "See your license usage, device activity, and overdue payments at a glance." },
+    { target: "[data-tour='nav-device-management']", title: "Device Management", text: "Add, lock/unlock, and manage every device here — or use Device Settings to Enroll, Update Expiration, Remove Restriction, and Unenroll." },
+    { target: "[data-tour='nav-custom-management']", title: "Custom Management", text: "Send push notifications and pop-ups to devices, and customize your product name, icon, and lock-screen behavior here." },
+    { target: "[data-tour='nav-settings-management']", title: "Settings Management", text: "Manage staff roles and invite your team here." },
+  ];
+
   return (
     <header style={S.topbar}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }} data-tour="brand">
         <BrandLogo />
         <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>{name}</span>
         <span style={{ fontSize: 13, color: "#9AA1AE", marginLeft: 4 }}>{branchName ? `Branch: ${branchName}` : "Hi, welcome back"}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <button style={S.tourBtn} onClick={() => setTourOpen(true)}>New User Tour</button>
         {isSuperAdmin && (
-          <button style={S.secondaryBtn} onClick={onSwitchToSuperAdmin}>
+          <button style={S.secondaryBtn} onClick={onSwitchToSuperAdmin} data-tour="switch-super">
             <ShieldCheck size={14} /> Super Admin
           </button>
         )}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#6B7280", fontSize: 13 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#6B7280", fontSize: 13 }} data-tour="help">
           <HelpCircle size={15} />
           Help
         </div>
         <div style={{ width: 1, height: 20, background: "#E6E8EC" }} />
-        <span style={{ fontSize: 13, color: "#6B7280" }}>{email}</span>
+        <span style={{ fontSize: 13, color: "#6B7280" }} data-tour="account">{email}</span>
         <button style={S.logoutBtn} onClick={() => supabase.auth.signOut()}>
           <LogOut size={14} /> Log out
         </button>
       </div>
+      {tourOpen && <TourOverlay steps={steps} onNavigate={setTab} onClose={() => setTourOpen(false)} />}
     </header>
   );
 }
@@ -270,19 +285,19 @@ function Sidebar({ tab, setTab }) {
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     {
-      group: "Device Management", icon: Smartphone, items: [
+      group: "Device Management", tourKey: "nav-device-management", icon: Smartphone, items: [
         { id: "devices", label: "Devices", icon: Smartphone },
         { id: "deviceSettings", label: "Device Settings", icon: Settings },
       ],
     },
     {
-      group: "Custom Management", icon: Sliders, items: [
+      group: "Custom Management", tourKey: "nav-custom-management", icon: Sliders, items: [
         { id: "sendMessage", label: "Send Message", icon: Send },
         { id: "generalSettings", label: "General Settings", icon: Settings },
       ],
     },
     {
-      group: "Settings Management", icon: Settings, items: [
+      group: "Settings Management", tourKey: "nav-settings-management", icon: Settings, items: [
         { id: "roles", label: "Role List", icon: ShieldCheck },
         { id: "accounts", label: "Account Management", icon: UserCog },
       ],
@@ -301,7 +316,7 @@ function Sidebar({ tab, setTab }) {
             const GroupIcon = it.icon;
             return (
               <div key={it.group}>
-                <div style={S.navGroupHeader} onClick={() => setOpenGroup(isOpen ? null : it.group)}>
+                <div style={S.navGroupHeader} onClick={() => setOpenGroup(isOpen ? null : it.group)} data-tour={it.tourKey}>
                   <GroupIcon size={15} />
                   <span style={{ flex: 1 }}>{it.group}</span>
                   <ChevronDown size={14} style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />
@@ -482,7 +497,7 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 12 }} data-tour="dashboard-stats">
         <StatCard label="Total licenses" value={totalLicenses} />
         <StatCard label="Remaining licenses" value={remainingLicenses} accent={licenseWarning ? "#D6414C" : undefined} />
         <StatCard label="Activated licenses" value={activatedDevices} />
@@ -2638,7 +2653,7 @@ function SuperAdminSidebar({ saTab, setSaTab }) {
           const Icon = it.icon;
           const active = saTab === it.id;
           return (
-            <div key={it.id} style={active ? S.navItemActive : S.navItem} onClick={() => setSaTab(it.id)}>
+            <div key={it.id} style={active ? S.navItemActive : S.navItem} onClick={() => setSaTab(it.id)} data-tour={`sa-nav-${it.id}`}>
               <Icon size={16} />
               <span>{it.label}</span>
             </div>
@@ -2787,6 +2802,16 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
   const [savingLimit, setSavingLimit] = useState(false);
   const [editName, setEditName] = useState(null); // { id, value }
   const [savingName, setSavingName] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+
+  const tourSteps = [
+    { target: "[data-tour='sa-brand']", title: "Welcome", text: "This is the Super Admin panel — manage every branch and its device license limit from here." },
+    ...(canSwitchToBranch ? [{ target: "[data-tour='sa-switch-branch']", title: "My Branch", text: "Switch back to your own branch's dashboard anytime from here." }] : []),
+    { target: "[data-tour='sa-nav-overview']", tab: "overview", title: "Overview", text: "See combined stats across every branch — total license capacity, devices used, and remaining." },
+    { target: "[data-tour='sa-nav-branches']", tab: "branches", title: "Branches", text: "Create new branches, rename them, and set their device license limits here." },
+    { target: "[data-tour='sa-add-branch']", tab: "branches", title: "Add a branch", text: "Click here to create a new branch — it also invites that branch's first admin by email." },
+    { target: "[data-tour='sa-branches-table']", tab: "branches", title: "View a branch", text: "Click View on any branch to see its devices and staff without leaving the Super Admin panel." },
+  ];
 
   useEffect(() => { load(); }, []);
 
@@ -2861,13 +2886,14 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     <div style={S.appShell}>
       <GlobalStyle />
       <header style={S.topbar}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }} data-tour="sa-brand">
           <div style={S.logoMark}>S</div>
           <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>Super Admin</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          <button style={S.tourBtn} onClick={() => setTourOpen(true)}>New User Tour</button>
           {canSwitchToBranch && (
-            <button style={S.secondaryBtn} onClick={onSwitchToBranch}>
+            <button style={S.secondaryBtn} onClick={onSwitchToBranch} data-tour="sa-switch-branch">
               <Smartphone size={14} /> My Branch
             </button>
           )}
@@ -2877,6 +2903,7 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
           </button>
         </div>
       </header>
+      {tourOpen && <TourOverlay steps={tourSteps} onNavigate={(t) => { setSaTab(t); setSelectedBranch(null); }} onClose={() => setTourOpen(false)} />}
 
       <div style={S.appBody}>
         <SuperAdminSidebar saTab={saTab} setSaTab={(t) => { setSaTab(t); setSelectedBranch(null); }} />
@@ -2890,13 +2917,13 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
           {saTab === "branches" && !selectedBranch && (
             <>
               <PageHeader eyebrow="Super Admin" title="Branches" count={branches.length}>
-                <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Add branch</button>
+                <button style={S.primaryBtn} onClick={openAdd} data-tour="sa-add-branch"><Plus size={16} /> Add branch</button>
               </PageHeader>
               <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
                 Each branch is an independent vendor installation — its own devices, staff and settings. Set how many device licenses a branch is allowed to use.
               </p>
 
-              <div style={S.tableCard}>
+              <div style={S.tableCard} data-tour="sa-branches-table">
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead><tr>{["Branch", "License limit", "Used", "Remaining", "", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                   <tbody>
@@ -2977,6 +3004,73 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
           </div>
         </Drawer>
       )}
+    </div>
+  );
+}
+
+/* ---------------- GUIDED TOUR ---------------- */
+
+function TourOverlay({ steps, onNavigate, onClose }) {
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const step = steps[i];
+
+  useEffect(() => {
+    if (step?.tab && onNavigate) onNavigate(step.tab);
+    const t = setTimeout(() => {
+      const el = step ? document.querySelector(step.target) : null;
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "instant" });
+        setRect(el.getBoundingClientRect());
+      } else {
+        setRect(null);
+      }
+    }, 60);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i]);
+
+  if (!step) return null;
+
+  const cardWidth = 300;
+  const pad = 8;
+  let top = rect ? rect.bottom + 14 : window.innerHeight / 2 - 80;
+  let left = rect ? Math.min(Math.max(rect.left, 16), window.innerWidth - cardWidth - 16) : window.innerWidth / 2 - cardWidth / 2;
+  if (rect && top + 170 > window.innerHeight) top = Math.max(rect.top - 170, 16);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 2000 }}>
+      <div
+        style={{
+          position: "fixed",
+          top: rect ? rect.top - pad : 0,
+          left: rect ? rect.left - pad : 0,
+          width: rect ? rect.width + pad * 2 : "100vw",
+          height: rect ? rect.height + pad * 2 : "100vh",
+          borderRadius: rect ? 8 : 0,
+          boxShadow: rect ? "0 0 0 2px #F2A93C, 0 0 0 4000px rgba(20,22,28,0.55)" : "0 0 0 4000px rgba(20,22,28,0.55)",
+          transition: "top 0.2s, left 0.2s, width 0.2s, height 0.2s",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          position: "fixed", top, left, width: cardWidth, background: "#fff", borderRadius: 10, padding: 18,
+          boxShadow: "0 12px 30px rgba(0,0,0,0.25)",
+        }}
+      >
+        <h3 className="serif" style={{ fontSize: 15.5, color: "#14161C", margin: "0 0 8px" }}>{step.title}</h3>
+        <p style={{ fontSize: 12.5, color: "#6B7280", margin: "0 0 14px", lineHeight: 1.6 }}>{step.text}</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "#9AA1AE" }}>{i + 1}/{steps.length}</span>
+          <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: "#6B7280", cursor: "pointer" }} onClick={onClose}>Skip</span>
+            <button style={S.primaryBtn} onClick={() => (i + 1 < steps.length ? setI(i + 1) : onClose())}>
+              {i + 1 < steps.length ? "Next" : "Got it"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3126,6 +3220,7 @@ const S = {
   h1: { fontSize: 30, fontWeight: 500, margin: 0, color: "#14161C" },
   primaryBtn: { display: "flex", alignItems: "center", gap: 7, background: "#F2A93C", color: "#2C1E06", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600 },
   secondaryBtn: { background: "transparent", color: "#374151", border: "1px solid #D8DCE3", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 500 },
+  tourBtn: { background: "#FBF1E1", color: "#8A5A10", border: "1px solid #F2D9A8", borderRadius: 8, padding: "8px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" },
   dangerBtn: { background: "#E5636A", color: "#2C0A0C", border: "none", borderRadius: 8, padding: "9px 16px", fontSize: 13.5, fontWeight: 600 },
   statCard: { background: "#FFFFFF", border: "1px solid #E6E8EC", borderRadius: 12, padding: "16px 18px" },
   select: { background: "#FFFFFF", border: "1px solid #D8DCE3", borderRadius: 8, color: "#374151", fontSize: 13.5, padding: "8px 12px" },
