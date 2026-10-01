@@ -2613,7 +2613,156 @@ function AccountManagement() {
 
 /* ---------------- SUPER ADMIN ---------------- */
 
+function SuperAdminSidebar({ saTab, setSaTab }) {
+  const nav = [
+    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "branches", label: "Branches", icon: Smartphone },
+  ];
+  return (
+    <aside style={S.sidebar}>
+      <nav style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+        {nav.map((it) => {
+          const Icon = it.icon;
+          const active = saTab === it.id;
+          return (
+            <div key={it.id} style={active ? S.navItemActive : S.navItem} onClick={() => setSaTab(it.id)}>
+              <Icon size={16} />
+              <span>{it.label}</span>
+            </div>
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+function SuperAdminOverview({ branches, deviceCounts, loading }) {
+  const totalBranches = branches.length;
+  const totalCapacity = branches.reduce((sum, b) => sum + (b.device_license_limit || 0), 0);
+  const totalUsed = branches.reduce((sum, b) => sum + (deviceCounts[b.id] || 0), 0);
+  const totalRemaining = Math.max(totalCapacity - totalUsed, 0);
+
+  return (
+    <div>
+      <PageHeader eyebrow="Super Admin" title="Overview" />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 28 }}>
+        <StatCard label="Branches" value={totalBranches} />
+        <StatCard label="Total license capacity" value={totalCapacity} />
+        <StatCard label="Devices used (all branches)" value={totalUsed} />
+        <StatCard label="Remaining (all branches)" value={totalRemaining} />
+      </div>
+
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Branches at a glance</h3>
+      <div style={S.tableCard}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Branch", "License limit", "Used", "Remaining"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={4} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && branches.length === 0 && <tr><td colSpan={4} style={S.emptyCell}>No branches yet.</td></tr>}
+            {branches.map((b) => {
+              const used = deviceCounts[b.id] || 0;
+              const remaining = Math.max(b.device_license_limit - used, 0);
+              return (
+                <tr key={b.id} style={S.tr}>
+                  <td style={S.td}>{b.name}</td>
+                  <td style={S.td}>{b.device_license_limit}</td>
+                  <td style={S.td}>{used}</td>
+                  <td style={S.td}>{remaining}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function BranchDetail({ branch, usedCount, onBack }) {
+  const [devices, setDevices] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { load(); }, [branch.id]);
+
+  async function load() {
+    setLoading(true);
+    const [{ data: deviceRows }, { data: staffRows }] = await Promise.all([
+      supabase.from("devices").select("*").eq("branch_id", branch.id).order("provisioned_at", { ascending: false }),
+      supabase.from("admin_users").select("*").eq("branch_id", branch.id).order("invited_at", { ascending: false }),
+    ]);
+    setDevices(deviceRows || []);
+    setStaff(staffRows || []);
+    setLoading(false);
+  }
+
+  const activated = devices.filter((d) => d.last_seen_at).length;
+  const pending = devices.length - activated;
+  const remaining = Math.max(branch.device_license_limit - devices.length, 0);
+
+  return (
+    <div>
+      <button style={{ ...S.secondaryBtn, marginBottom: 20 }} onClick={onBack}>&larr; Back to branches</button>
+      <PageHeader eyebrow="Super Admin · Branch" title={branch.name} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 28 }}>
+        <StatCard label="License limit" value={branch.device_license_limit} />
+        <StatCard label="Used" value={devices.length} />
+        <StatCard label="Remaining" value={remaining} />
+        <StatCard label="Activated" value={activated} />
+        <StatCard label="Pending" value={pending} />
+      </div>
+
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Devices</h3>
+      <div style={{ ...S.tableCard, marginBottom: 28 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Device", "Tag", "IMEI", "Status", "Last seen"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && devices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices yet.</td></tr>}
+            {devices.map((d) => (
+              <tr key={d.id} style={S.tr}>
+                <td style={S.td}>{d.device_model || d.imei || "—"}</td>
+                <td style={S.td}>{d.device_tag || "—"}</td>
+                <td style={S.td} className="mono">{d.imei || "—"}</td>
+                <td style={S.td}>
+                  <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
+                    {d.is_locked ? "Locked" : "Active"}
+                  </span>
+                  {d.sim_missing && <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>No SIM</span>}
+                </td>
+                <td style={S.td} className="mono">{d.last_seen_at ? new Date(d.last_seen_at).toLocaleDateString() : "never"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Staff</h3>
+      <div style={S.tableCard}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Name", "Email", "Role", "Status"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={4} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && staff.length === 0 && <tr><td colSpan={4} style={S.emptyCell}>No staff yet.</td></tr>}
+            {staff.map((u) => (
+              <tr key={u.id} style={S.tr}>
+                <td style={S.td}>{u.name}</td>
+                <td style={S.td} className="mono">{u.email}</td>
+                <td style={S.td}>{u.role}</td>
+                <td style={S.td}><span style={{ ...S.badge, background: "#E5F8F2", color: "#0E9488" }}>{u.status || "Invited"}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
+  const [saTab, setSaTab] = useState("overview");
+  const [selectedBranch, setSelectedBranch] = useState(null);
   const [branches, setBranches] = useState([]);
   const [deviceCounts, setDeviceCounts] = useState({});
   const [loading, setLoading] = useState(true);
@@ -2716,73 +2865,89 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
         </div>
       </header>
 
-      <main style={{ ...S.main, maxWidth: 960, margin: "0 auto", width: "100%" }}>
-        <PageHeader eyebrow="Super Admin" title="Branches" count={branches.length}>
-          <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Add branch</button>
-        </PageHeader>
-        <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
-          Each branch is an independent vendor installation — its own devices, staff and settings. Set how many device licenses a branch is allowed to use.
-        </p>
+      <div style={S.appBody}>
+        <SuperAdminSidebar saTab={saTab} setSaTab={(t) => { setSaTab(t); setSelectedBranch(null); }} />
+        <main style={S.main}>
+          {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} loading={loading} />}
 
-        <div style={S.tableCard}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead><tr>{["Branch", "License limit", "Used", "Remaining", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
-              {!loading && branches.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No branches yet.</td></tr>}
-              {branches.map((b) => {
-                const used = deviceCounts[b.id] || 0;
-                const remaining = Math.max(b.device_license_limit - used, 0);
-                const editing = editLimit?.id === b.id;
-                const editingName = editName?.id === b.id;
-                return (
-                  <tr key={b.id} style={S.tr}>
-                    <td style={S.td}>
-                      {editingName ? (
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input
-                            style={{ ...S.input, width: 160, padding: "6px 10px" }}
-                            value={editName.value}
-                            onChange={(e) => setEditName({ ...editName, value: e.target.value })}
-                          />
-                          <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveName} disabled={savingName}>Save</button>
-                          <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditName(null)}>Cancel</button>
-                        </div>
-                      ) : (
-                        <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditName({ id: b.id, value: b.name })}>
-                          {b.name} <Pencil size={12} color="#9AA1AE" />
-                        </span>
-                      )}
-                    </td>
-                    <td style={S.td}>
-                      {editing ? (
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input
-                            style={{ ...S.input, width: 90, padding: "6px 10px" }}
-                            type="number"
-                            min="0"
-                            value={editLimit.value}
-                            onChange={(e) => setEditLimit({ ...editLimit, value: e.target.value })}
-                          />
-                          <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveLimit} disabled={savingLimit}>Save</button>
-                          <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditLimit(null)}>Cancel</button>
-                        </div>
-                      ) : (
-                        <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditLimit({ id: b.id, value: String(b.device_license_limit) })}>
-                          {b.device_license_limit} <Pencil size={12} color="#9AA1AE" />
-                        </span>
-                      )}
-                    </td>
-                    <td style={S.td}>{used}</td>
-                    <td style={S.td}>{remaining}</td>
-                    <td style={{ ...S.td, textAlign: "right" }} className="mono">{new Date(b.created_at).toLocaleDateString()}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </main>
+          {saTab === "branches" && selectedBranch && (
+            <BranchDetail branch={selectedBranch} usedCount={deviceCounts[selectedBranch.id] || 0} onBack={() => setSelectedBranch(null)} />
+          )}
+
+          {saTab === "branches" && !selectedBranch && (
+            <>
+              <PageHeader eyebrow="Super Admin" title="Branches" count={branches.length}>
+                <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Add branch</button>
+              </PageHeader>
+              <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
+                Each branch is an independent vendor installation — its own devices, staff and settings. Set how many device licenses a branch is allowed to use.
+              </p>
+
+              <div style={S.tableCard}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead><tr>{["Branch", "License limit", "Used", "Remaining", "", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {loading && <tr><td colSpan={6} style={S.emptyCell}>Loading…</td></tr>}
+                    {!loading && branches.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No branches yet.</td></tr>}
+                    {branches.map((b) => {
+                      const used = deviceCounts[b.id] || 0;
+                      const remaining = Math.max(b.device_license_limit - used, 0);
+                      const editing = editLimit?.id === b.id;
+                      const editingName = editName?.id === b.id;
+                      return (
+                        <tr key={b.id} style={S.tr}>
+                          <td style={S.td}>
+                            {editingName ? (
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <input
+                                  style={{ ...S.input, width: 160, padding: "6px 10px" }}
+                                  value={editName.value}
+                                  onChange={(e) => setEditName({ ...editName, value: e.target.value })}
+                                />
+                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveName} disabled={savingName}>Save</button>
+                                <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditName(null)}>Cancel</button>
+                              </div>
+                            ) : (
+                              <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditName({ id: b.id, value: b.name })}>
+                                {b.name} <Pencil size={12} color="#9AA1AE" />
+                              </span>
+                            )}
+                          </td>
+                          <td style={S.td}>
+                            {editing ? (
+                              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                                <input
+                                  style={{ ...S.input, width: 90, padding: "6px 10px" }}
+                                  type="number"
+                                  min="0"
+                                  value={editLimit.value}
+                                  onChange={(e) => setEditLimit({ ...editLimit, value: e.target.value })}
+                                />
+                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveLimit} disabled={savingLimit}>Save</button>
+                                <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditLimit(null)}>Cancel</button>
+                              </div>
+                            ) : (
+                              <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditLimit({ id: b.id, value: String(b.device_license_limit) })}>
+                                {b.device_license_limit} <Pencil size={12} color="#9AA1AE" />
+                              </span>
+                            )}
+                          </td>
+                          <td style={S.td}>{used}</td>
+                          <td style={S.td}>{remaining}</td>
+                          <td style={S.td} className="mono">{new Date(b.created_at).toLocaleDateString()}</td>
+                          <td style={{ ...S.td, textAlign: "right" }}>
+                            <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => setSelectedBranch(b)}>View</button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </main>
+      </div>
 
       {drawerOpen && (
         <Drawer title="Add branch" onClose={() => setDrawerOpen(false)}>
