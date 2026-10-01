@@ -3,8 +3,9 @@ import {
   Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming,
+  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi,
 } from "lucide-react";
+import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
 
 const money = (n) => `Rs ${Number(n || 0).toLocaleString()}`;
@@ -149,6 +150,7 @@ export default function App() {
                 />
               )}
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
+              {tab === "installation" && <InstallationPage />}
               {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} initialImei={sendMessageImei} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
               {tab === "roles" && <RolesList />}
@@ -300,6 +302,7 @@ function Sidebar({ tab, setTab }) {
       group: "Device Management", tourKey: "nav-device-management", icon: Smartphone, items: [
         { id: "devices", label: "Devices", icon: Smartphone },
         { id: "deviceSettings", label: "Device Settings", icon: Settings },
+        { id: "installation", label: "Installation", icon: QrCode },
       ],
     },
     {
@@ -1668,6 +1671,177 @@ function Payments() {
           onCancel={() => setConfirmDelete(null)}
         />
       )}
+    </div>
+  );
+}
+
+/* ---------------- INSTALLATION (QR provisioning) ---------------- */
+
+function InstallationPage() {
+  const { branchId } = useContext(BranchContext);
+  const [apkUrl, setApkUrl] = useState("");
+  const [packageName, setPackageName] = useState("");
+  const [adminReceiver, setAdminReceiver] = useState("");
+  const [checksum, setChecksum] = useState("");
+  const [wifiSsid, setWifiSsid] = useState("");
+  const [wifiPassword, setWifiPassword] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState("");
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
+  useEffect(() => {
+    if (!branchId) return;
+    supabase
+      .from("app_provisioning")
+      .select("*")
+      .eq("branch_id", branchId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          setApkUrl(data.apk_url || "");
+          setPackageName(data.package_name || "");
+          setAdminReceiver(data.admin_receiver || "");
+          setChecksum(data.signature_checksum || "");
+          setWifiSsid(data.wifi_ssid || "");
+          setWifiPassword(data.wifi_password || "");
+        }
+        setLoading(false);
+      });
+  }, [branchId]);
+
+  useEffect(() => {
+    if (!packageName.trim() || !adminReceiver.trim() || !checksum.trim() || !apkUrl.trim()) { setQrDataUrl(""); return; }
+    const payload = {
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME": `${packageName.trim()}/${adminReceiver.trim()}`,
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_SIGNATURE_CHECKSUM": checksum.trim(),
+      "android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION": apkUrl.trim(),
+      "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": true,
+      "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
+    };
+    if (wifiSsid.trim()) {
+      payload["android.app.extra.PROVISIONING_WIFI_SSID"] = wifiSsid.trim();
+      payload["android.app.extra.PROVISIONING_WIFI_SECURITY_TYPE"] = wifiPassword ? "WPA" : "NONE";
+      if (wifiPassword) payload["android.app.extra.PROVISIONING_WIFI_PASSWORD"] = wifiPassword;
+    }
+    let cancelled = false;
+    QRCode.toDataURL(JSON.stringify(payload), { width: 280, margin: 1 })
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { if (!cancelled) setQrDataUrl(""); });
+    return () => { cancelled = true; };
+  }, [packageName, adminReceiver, checksum, apkUrl, wifiSsid, wifiPassword]);
+
+  async function save() {
+    setSaving(true);
+    setSaveMsg("");
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from("app_provisioning").upsert({
+      branch_id: branchId,
+      apk_url: apkUrl.trim(),
+      package_name: packageName.trim(),
+      admin_receiver: adminReceiver.trim(),
+      signature_checksum: checksum.trim(),
+      wifi_ssid: wifiSsid.trim() || null,
+      wifi_password: wifiPassword || null,
+      updated_at: new Date().toISOString(),
+      updated_by: user?.email || "admin",
+    }, { onConflict: "branch_id" });
+    setSaving(false);
+    setSaveMsg(error ? error.message : "Saved.");
+  }
+
+  const steps = [
+    { title: "Reset or unbox the phone", text: "Factory reset it (Settings → System → Reset options → Erase all data) or use a brand-new phone that hasn't been set up yet." },
+    { title: "Open the QR scanner", text: "On the first \"Welcome\" screen — before choosing Wi-Fi or signing in — tap anywhere on the screen 6 times in a row. This opens the camera for QR code setup." },
+    { title: "Connect to Wi-Fi if asked", text: "If it asks for Wi-Fi first, connect to the shop's network — or just scan the QR code below, since it carries the Wi-Fi details too (if you filled them in on the left)." },
+    { title: "Scan this QR code", text: "Point the phone's camera at the QR code on this page and scan it." },
+    { title: "Let it set up automatically", text: "The phone downloads \"KE Setup\" (the bootstrap app), installs it as device owner, then it downloads and installs the main Lock app in the background. Don't interrupt this — it can take a minute or two." },
+    { title: "Enroll it in this panel", text: "Before handing the phone over, go to Device Management → Device Settings → Enroll Device and add this phone's IMEI, model and tag so it shows up in the Devices list." },
+  ];
+
+  return (
+    <div>
+      <PageHeader eyebrow="Device Management" title="Installation" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 620 }}>
+        Scan this QR code on a factory-reset phone to automatically install the lock app and set it as device owner — the same bootstrap APK flow used for every new device.
+      </p>
+
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ ...S.tableCard, padding: 24, flex: "1 1 420px", minWidth: 320 }}>
+          <h3 className="serif" style={{ fontSize: 17, color: "#14161C", margin: "0 0 6px" }}>Shop Wi-Fi (optional)</h3>
+          <p style={{ fontSize: 12.5, color: "#6B7280", margin: "0 0 16px", lineHeight: 1.6 }}>
+            If filled in, the phone connects to this network automatically during setup — no need to type it on the phone.
+          </p>
+          <Field label="Wi-Fi network name (SSID)">
+            <input style={S.input} value={wifiSsid} onChange={(e) => setWifiSsid(e.target.value)} placeholder="e.g. KarachiElectronics-Shop" />
+          </Field>
+          <Field label="Wi-Fi password">
+            <input style={S.input} value={wifiPassword} onChange={(e) => setWifiPassword(e.target.value)} placeholder="Leave blank for an open network" />
+          </Field>
+
+          <button type="button" onClick={() => setShowAdvanced((v) => !v)} style={{ background: "none", border: "none", color: "#F2A93C", fontSize: 12.5, fontWeight: 600, padding: 0, margin: "4px 0 16px", cursor: "pointer" }}>
+            {showAdvanced ? "Hide advanced settings" : "Show advanced settings"}
+          </button>
+
+          {showAdvanced && (
+            <>
+              <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "-8px 0 14px" }}>
+                These come from the current bootstrap app build. Only change them if the Android app team gives you new values after a new build.
+              </p>
+              <Field label="APK download URL">
+                <input style={S.input} className="mono" value={apkUrl} onChange={(e) => setApkUrl(e.target.value)} />
+              </Field>
+              <Field label="Package name">
+                <input style={S.input} className="mono" value={packageName} onChange={(e) => setPackageName(e.target.value)} />
+              </Field>
+              <Field label="Device admin receiver">
+                <input style={S.input} className="mono" value={adminReceiver} onChange={(e) => setAdminReceiver(e.target.value)} />
+              </Field>
+              <Field label="Signing certificate checksum">
+                <input style={S.input} className="mono" value={checksum} onChange={(e) => setChecksum(e.target.value)} />
+              </Field>
+            </>
+          )}
+
+          <button style={{ ...S.primaryBtn, marginTop: 8, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving || loading}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+          {saveMsg && <p style={{ fontSize: 12.5, color: saveMsg === "Saved." ? "#0E9488" : "#D6414C", margin: "10px 0 0" }}>{saveMsg}</p>}
+        </div>
+
+        <div style={{ flex: "0 0 260px", textAlign: "center" }}>
+          <div style={{ ...S.tableCard, padding: 20 }}>
+            {qrDataUrl ? (
+              <img src={qrDataUrl} alt="Device provisioning QR code" style={{ width: "100%", height: "auto", borderRadius: 8 }} />
+            ) : (
+              <div style={{ width: "100%", aspectRatio: "1", display: "flex", alignItems: "center", justifyContent: "center", color: "#9AA1AE", fontSize: 12.5, textAlign: "center", padding: 16 }}>
+                {loading ? "Loading…" : "Fill in the fields to generate the QR code."}
+              </div>
+            )}
+          </div>
+          <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "10px 0 0", display: "flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+            <Wifi size={12} /> Scan during first-time setup only.
+          </p>
+        </div>
+      </div>
+
+      <div style={{ ...S.tableCard, padding: 24, marginTop: 24 }}>
+        <h3 className="serif" style={{ fontSize: 17, color: "#14161C", margin: "0 0 16px" }}>Step-by-step: setting up a new phone</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {steps.map((s, i) => (
+            <div key={i} style={{ display: "flex", gap: 14 }}>
+              <div style={{ flex: "0 0 28px", height: 28, borderRadius: "50%", background: "#F2A93C", color: "#2C1E06", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13 }}>
+                {i + 1}
+              </div>
+              <div>
+                <p style={{ fontWeight: 600, fontSize: 13.5, margin: "0 0 2px", color: "#14161C" }}>{s.title}</p>
+                <p style={{ fontSize: 12.5, color: "#6B7280", margin: 0, lineHeight: 1.6 }}>{s.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
