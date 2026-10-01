@@ -9,10 +9,6 @@ import { supabase } from "./supabaseClient";
 
 const money = (n) => `Rs ${Number(n || 0).toLocaleString()}`;
 
-// Total device licenses this installation is allowed to use. Fixed for now —
-// change this number if the license count changes.
-const TOTAL_DEVICE_LICENSES = 500;
-
 function initials(name) {
   return (name || "").split(" ").filter(Boolean).slice(0, 2).map((n) => n[0].toUpperCase()).join("");
 }
@@ -37,26 +33,52 @@ function formatRelativeTime(iso) {
 }
 
 const BrandingContext = createContext({ name: "Northline", iconUrl: null, reload: () => {} });
+const BranchContext = createContext({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, reload: () => {} });
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
+  const [profileChecked, setProfileChecked] = useState(false);
   const [tab, setTab] = useState("dashboard");
   const [deviceSettingsTab, setDeviceSettingsTab] = useState("enroll");
   const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
+  const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0 });
+  const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
 
-  async function loadBranding() {
-    const { data } = await supabase.from("app_branding").select("name, icon_url").eq("id", 1).maybeSingle();
-    if (data) setBranding({ name: data.name || "Northline", iconUrl: data.icon_url || null });
+  async function loadProfile(userId) {
+    setProfileChecked(false);
+    const { data: adminRow } = await supabase.from("admin_users").select("branch_id, is_super_admin").eq("id", userId).maybeSingle();
+    const isSuperAdmin = !!adminRow?.is_super_admin;
+    const branchId = adminRow?.branch_id || null;
+
+    let branchName = "";
+    let deviceLicenseLimit = 0;
+    if (branchId) {
+      const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit").eq("id", branchId).maybeSingle();
+      branchName = branchRow?.name || "";
+      deviceLicenseLimit = branchRow?.device_license_limit || 0;
+    }
+
+    setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit });
+    setAppMode(branchId ? "branch" : "super");
+
+    if (branchId) {
+      const { data: brandingRow } = await supabase.from("app_branding").select("name, icon_url").eq("branch_id", branchId).maybeSingle();
+      if (brandingRow) setBranding({ name: brandingRow.name || "Northline", iconUrl: brandingRow.icon_url || null });
+    }
+    setProfileChecked(true);
   }
 
   useEffect(() => {
-    loadBranding();
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
       setAuthChecked(true);
+      if (data.session) loadProfile(data.session.user.id);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_e, sess) => setSession(sess));
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, sess) => {
+      setSession(sess);
+      if (sess) loadProfile(sess.user.id);
+    });
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -66,27 +88,41 @@ export default function App() {
 
   if (!authChecked) return <div style={{ minHeight: "100vh", background: "#F5F6F8" }} />;
 
-  const brandingValue = { ...branding, reload: loadBranding };
+  const brandingValue = { ...branding, reload: () => session && loadProfile(session.user.id) };
   if (!session) return <BrandingContext.Provider value={brandingValue}><LoginScreen /></BrandingContext.Provider>;
+
+  if (!profileChecked) return <div style={{ minHeight: "100vh", background: "#F5F6F8" }} />;
+
+  const branchValue = { ...profile, reload: () => loadProfile(session.user.id) };
+
+  if (appMode === "super") {
+    return (
+      <BranchContext.Provider value={branchValue}>
+        <SuperAdminPortal email={session.user.email} canSwitchToBranch={!!profile.branchId} onSwitchToBranch={() => setAppMode("branch")} />
+      </BranchContext.Provider>
+    );
+  }
 
   return (
     <BrandingContext.Provider value={brandingValue}>
-      <div style={S.appShell}>
-        <GlobalStyle />
-        <TopBar email={session.user.email} />
-        <div style={S.appBody}>
-          <Sidebar tab={tab} setTab={setTab} />
-          <main style={S.main}>
-            {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
-            {tab === "devices" && <Devices />}
-            {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
-            {tab === "sendMessage" && <SendMessagePage />}
-            {tab === "generalSettings" && <GeneralSettingsPage />}
-            {tab === "roles" && <RolesList />}
-            {tab === "accounts" && <AccountManagement />}
-          </main>
+      <BranchContext.Provider value={branchValue}>
+        <div style={S.appShell}>
+          <GlobalStyle />
+          <TopBar email={session.user.email} onSwitchToSuperAdmin={() => setAppMode("super")} />
+          <div style={S.appBody}>
+            <Sidebar tab={tab} setTab={setTab} />
+            <main style={S.main}>
+              {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
+              {tab === "devices" && <Devices />}
+              {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
+              {tab === "sendMessage" && <SendMessagePage />}
+              {tab === "generalSettings" && <GeneralSettingsPage />}
+              {tab === "roles" && <RolesList />}
+              {tab === "accounts" && <AccountManagement />}
+            </main>
+          </div>
         </div>
-      </div>
+      </BranchContext.Provider>
     </BrandingContext.Provider>
   );
 }
@@ -99,16 +135,22 @@ function BrandLogo({ size = 28 }) {
   return <div style={{ ...S.logoMark, width: size, height: size }}>{(name || "N").charAt(0).toUpperCase()}</div>;
 }
 
-function TopBar({ email }) {
+function TopBar({ email, onSwitchToSuperAdmin }) {
   const { name } = useContext(BrandingContext);
+  const { isSuperAdmin, branchName } = useContext(BranchContext);
   return (
     <header style={S.topbar}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <BrandLogo />
         <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>{name}</span>
-        <span style={{ fontSize: 13, color: "#9AA1AE", marginLeft: 4 }}>Hi, welcome back</span>
+        <span style={{ fontSize: 13, color: "#9AA1AE", marginLeft: 4 }}>{branchName ? `Branch: ${branchName}` : "Hi, welcome back"}</span>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        {isSuperAdmin && (
+          <button style={S.secondaryBtn} onClick={onSwitchToSuperAdmin}>
+            <ShieldCheck size={14} /> Super Admin
+          </button>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: 6, color: "#6B7280", fontSize: 13 }}>
           <HelpCircle size={15} />
           Help
@@ -300,6 +342,7 @@ function QuickOpTile({ icon: Icon, label, onClick }) {
 }
 
 function Dashboard({ setTab, setDeviceSettingsTab }) {
+  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
   const [removalLog, setRemovalLog] = useState([]);
   const [overdueList, setOverdueList] = useState([]);
@@ -311,7 +354,7 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
 
   useEffect(() => {
     load();
-    supabase.from("app_branding").select("license_warning_value").eq("id", 1).maybeSingle()
+    supabase.from("app_branding").select("license_warning_value").eq("branch_id", branchId).maybeSingle()
       .then(({ data }) => setLicenseWarningValue(data?.license_warning_value ?? null));
   }, []);
 
@@ -339,7 +382,7 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
     setLoading(false);
   }
 
-  const totalLicenses = TOTAL_DEVICE_LICENSES;
+  const totalLicenses = deviceLicenseLimit;
   const activatedDevices = devices.filter((d) => d.last_seen_at).length;
   const pendingDevices = devices.length - activatedDevices;
   const remainingLicenses = Math.max(totalLicenses - devices.length, 0);
@@ -493,6 +536,7 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
 /* ---------------- DEVICES ---------------- */
 
 function Devices() {
+  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editDraft, setEditDraft] = useState(null);
@@ -557,6 +601,7 @@ function Devices() {
 
   async function addDevice() {
     if (!(addDeviceDraft.device_model || "").trim()) { setError("Enter a device model."); return; }
+    if (devices.length >= deviceLicenseLimit) { setError(`Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to raise it.`); return; }
     setError("");
     const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
     await supabase.from("devices").insert({
@@ -565,6 +610,7 @@ function Devices() {
       device_tag: (addDeviceDraft.device_tag || "").trim() || null,
       unlock_pin,
       unlock_pin_generated_at: new Date().toISOString(),
+      branch_id: branchId,
     });
     setAddDeviceDraft({ device_model: "", imei: "", device_tag: "" });
     setAddDeviceOpen(false);
@@ -852,7 +898,7 @@ function Devices() {
 
   async function performDelete(device) {
     await supabase.from("devices").delete().eq("id", device.id);
-    await supabase.from("device_removal_log").insert({ device_model: device.device_model || null, imei: device.imei || null });
+    await supabase.from("device_removal_log").insert({ device_model: device.device_model || null, imei: device.imei || null, branch_id: branchId });
     setConfirmDelete(null);
     load();
   }
@@ -874,12 +920,12 @@ function Devices() {
   const licenseStats = useMemo(() => {
     const activated = devices.filter((d) => d.last_seen_at).length;
     return {
-      total: TOTAL_DEVICE_LICENSES,
+      total: deviceLicenseLimit,
       activated,
       pending: devices.length - activated,
-      remaining: Math.max(TOTAL_DEVICE_LICENSES - devices.length, 0),
+      remaining: Math.max(deviceLicenseLimit - devices.length, 0),
     };
-  }, [devices]);
+  }, [devices, deviceLicenseLimit]);
 
   function resetFilters() {
     setStatusFilter("all");
@@ -1250,6 +1296,7 @@ function UploadXlsBox() {
 }
 
 function DeviceSettingsPage({ initialTab }) {
+  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
   const [activeTab, setActiveTab] = useState(initialTab || "enroll");
   const [unitType, setUnitType] = useState("single");
   const [imei, setImei] = useState("");
@@ -1293,12 +1340,19 @@ function DeviceSettingsPage({ initialTab }) {
     if (!trimmed) { setEnrollMsg("Enter an IMEI."); return; }
     setEnrolling(true);
     setEnrollMsg("");
+    const { count } = await supabase.from("devices").select("*", { count: "exact", head: true });
+    if ((count || 0) >= deviceLicenseLimit) {
+      setEnrolling(false);
+      setEnrollMsg(`Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to raise it.`);
+      return;
+    }
     const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
     const { error } = await supabase.from("devices").insert({
       imei: trimmed,
       is_locked: lockOnActivation,
       unlock_pin,
       unlock_pin_generated_at: new Date().toISOString(),
+      branch_id: branchId,
     });
     setEnrolling(false);
     if (error) setEnrollMsg(error.message);
@@ -1348,7 +1402,7 @@ function DeviceSettingsPage({ initialTab }) {
 
   async function performUnenroll() {
     await supabase.from("devices").delete().eq("id", unenrollConfirm.id);
-    await supabase.from("device_removal_log").insert({ device_model: unenrollConfirm.device_model || null, imei: unenrollConfirm.imei || null });
+    await supabase.from("device_removal_log").insert({ device_model: unenrollConfirm.device_model || null, imei: unenrollConfirm.imei || null, branch_id: branchId });
     setUnenrollConfirm(null);
     setImei("");
     setUnenrollMsg("Device unenrolled — fully removed from the app.");
@@ -1929,6 +1983,7 @@ function SettingsCard({ title, description, toggle, checked, onToggle, children 
 }
 
 function GeneralSettingsPage() {
+  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
   const branding = useContext(BrandingContext);
   const [name, setName] = useState(branding.name || "");
   const [savingName, setSavingName] = useState(false);
@@ -1948,14 +2003,14 @@ function GeneralSettingsPage() {
   useEffect(() => {
     supabase.from("devices").select("*", { count: "exact", head: true })
       .then(({ count }) => setDeviceCount(count || 0));
-    supabase.from("app_branding").select("license_warning_value, license_notify_email").eq("id", 1).maybeSingle()
+    supabase.from("app_branding").select("license_warning_value, license_notify_email").eq("branch_id", branchId).maybeSingle()
       .then(({ data }) => {
         setWarningValue(data?.license_warning_value != null ? String(data.license_warning_value) : "");
         setNotifyEmail(data?.license_notify_email || "");
       });
   }, []);
 
-  const remainingLicenses = deviceCount == null ? null : TOTAL_DEVICE_LICENSES - deviceCount;
+  const remainingLicenses = deviceCount == null ? null : deviceLicenseLimit - deviceCount;
   const warningNum = warningValue === "" ? null : Number(warningValue);
   const licenseWarningActive = remainingLicenses != null && warningNum != null && remainingLicenses <= warningNum;
 
@@ -1965,7 +2020,7 @@ function GeneralSettingsPage() {
     const { error } = await supabase.from("app_branding").update({
       license_warning_value: warningValue === "" ? null : Number(warningValue),
       license_notify_email: notifyEmail.trim() || null,
-    }).eq("id", 1);
+    }).eq("branch_id", branchId);
     setSavingLicense(false);
     setLicenseMsg(error ? error.message : "Saved.");
   }
@@ -1990,7 +2045,7 @@ function GeneralSettingsPage() {
       return;
     }
     if (list.length) {
-      const { error: insErr } = await supabase.from("whitelisted_numbers").insert(list.map((n) => ({ label: n, phone_number: n })));
+      const { error: insErr } = await supabase.from("whitelisted_numbers").insert(list.map((n) => ({ label: n, phone_number: n, branch_id: branchId })));
       if (insErr) {
         setSavingOutgoing(false);
         setOutgoingMsg(insErr.message);
@@ -2008,7 +2063,7 @@ function GeneralSettingsPage() {
   const [appsMsg, setAppsMsg] = useState("");
 
   useEffect(() => {
-    supabase.from("app_branding").select("whitelisted_apps_enabled, whitelisted_apps").eq("id", 1).maybeSingle()
+    supabase.from("app_branding").select("whitelisted_apps_enabled, whitelisted_apps").eq("branch_id", branchId).maybeSingle()
       .then(({ data }) => {
         setAppsEnabled(!!data?.whitelisted_apps_enabled);
         setAppsList(data?.whitelisted_apps || "");
@@ -2022,7 +2077,7 @@ function GeneralSettingsPage() {
     const { error } = await supabase.from("app_branding").update({
       whitelisted_apps_enabled: appsEnabled,
       whitelisted_apps: list.join(","),
-    }).eq("id", 1);
+    }).eq("branch_id", branchId);
     setSavingApps(false);
     if (error) setAppsMsg(error.message);
     else {
@@ -2043,7 +2098,7 @@ function GeneralSettingsPage() {
   useEffect(() => {
     supabase.from("app_branding")
       .select("watermark_lockscreen_enabled, watermark_sim_removed_enabled, watermark_sim_removed_text")
-      .eq("id", 1).maybeSingle()
+      .eq("branch_id", branchId).maybeSingle()
       .then(({ data }) => {
         setLockscreenWatermark(!!data?.watermark_lockscreen_enabled);
         setSimWatermarkEnabled(!!data?.watermark_sim_removed_enabled);
@@ -2055,7 +2110,7 @@ function GeneralSettingsPage() {
     setLockscreenWatermark(val);
     setSavingLockscreenWatermark(true);
     setLockscreenWatermarkMsg("");
-    const { error } = await supabase.from("app_branding").update({ watermark_lockscreen_enabled: val }).eq("id", 1);
+    const { error } = await supabase.from("app_branding").update({ watermark_lockscreen_enabled: val }).eq("branch_id", branchId);
     setSavingLockscreenWatermark(false);
     setLockscreenWatermarkMsg(error ? error.message : "Saved.");
   }
@@ -2066,7 +2121,7 @@ function GeneralSettingsPage() {
     const { error } = await supabase.from("app_branding").update({
       watermark_sim_removed_enabled: simWatermarkEnabled,
       watermark_sim_removed_text: simWatermarkText.trim() || null,
-    }).eq("id", 1);
+    }).eq("branch_id", branchId);
     setSavingSimWatermark(false);
     setSimWatermarkMsg(error ? error.message : "Saved.");
   }
@@ -2076,7 +2131,7 @@ function GeneralSettingsPage() {
     if (!trimmed) return;
     setSavingName(true);
     setNameMsg("");
-    const { error } = await supabase.from("app_branding").update({ name: trimmed }).eq("id", 1);
+    const { error } = await supabase.from("app_branding").update({ name: trimmed }).eq("branch_id", branchId);
     setSavingName(false);
     if (error) setNameMsg(error.message);
     else {
@@ -2104,7 +2159,7 @@ function GeneralSettingsPage() {
       return;
     }
     const { data: pub } = supabase.storage.from("branding").getPublicUrl(path);
-    const { error: updErr } = await supabase.from("app_branding").update({ icon_url: pub.publicUrl }).eq("id", 1);
+    const { error: updErr } = await supabase.from("app_branding").update({ icon_url: pub.publicUrl }).eq("branch_id", branchId);
     setUploadingIcon(false);
     if (updErr) setIconMsg(updErr.message);
     else {
@@ -2158,14 +2213,14 @@ function GeneralSettingsPage() {
           </Field>
         </SettingsCard>
 
-        <SettingsCard title="Available remaining amount warning value" description={`This installation is licensed for ${TOTAL_DEVICE_LICENSES} devices. When the remaining amount drops to or below the value set here, a warning banner shows on the Dashboard.`}>
+        <SettingsCard title="Available remaining amount warning value" description={`This installation is licensed for ${deviceLicenseLimit} devices. When the remaining amount drops to or below the value set here, a warning banner shows on the Dashboard.`}>
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center", background: licenseWarningActive ? "#FDEBEC" : "#F5F6F8",
             border: `1px solid ${licenseWarningActive ? "#F4B7BC" : "#E6E8EC"}`, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13,
           }}>
             <span style={{ color: "#6B7280" }}>Used</span>
             <strong style={{ color: licenseWarningActive ? "#B0222D" : "#14161C" }}>
-              {deviceCount == null ? "…" : `${deviceCount} / ${TOTAL_DEVICE_LICENSES}`}
+              {deviceCount == null ? "…" : `${deviceCount} / ${deviceLicenseLimit}`}
               {remainingLicenses != null && ` (${Math.max(remainingLicenses, 0)} remaining)`}
             </strong>
           </div>
@@ -2331,6 +2386,7 @@ function GeneralSettingsPage() {
 /* ---------------- ROLES ---------------- */
 
 function RolesList() {
+  const { branchId } = useContext(BranchContext);
   const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -2354,7 +2410,7 @@ function RolesList() {
     if (!draft.name.trim()) { setErrors({ name: "Enter a role name." }); return; }
     const { data: { user } } = await supabase.auth.getUser();
     if (draft.id == null) {
-      await supabase.from("roles").insert({ name: draft.name.trim(), created_by: user?.email || "admin" });
+      await supabase.from("roles").insert({ name: draft.name.trim(), created_by: user?.email || "admin", branch_id: branchId });
     } else {
       await supabase.from("roles").update({ name: draft.name.trim() }).eq("id", draft.id);
     }
@@ -2424,6 +2480,7 @@ function RolesList() {
 /* ---------------- ACCOUNT MANAGEMENT ---------------- */
 
 function AccountManagement() {
+  const { branchId } = useContext(BranchContext);
   const [users, setUsers] = useState([]);
   const [roleOptions, setRoleOptions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2460,7 +2517,7 @@ function AccountManagement() {
     setInviting(true);
     const { data: { user } } = await supabase.auth.getUser();
     const { data, error } = await supabase.functions.invoke("invite-admin-user", {
-      body: { name: draft.name.trim(), email: draft.email.trim(), role: draft.role.trim(), invited_by: user?.email || "admin" },
+      body: { name: draft.name.trim(), email: draft.email.trim(), role: draft.role.trim(), invited_by: user?.email || "admin", branch_id: branchId },
     });
     setInviting(false);
     if (error || !data?.success) {
@@ -2540,6 +2597,170 @@ function AccountManagement() {
           onConfirm={() => performDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- SUPER ADMIN ---------------- */
+
+function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
+  const [branches, setBranches] = useState([]);
+  const [deviceCounts, setDeviceCounts] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [draft, setDraft] = useState({ name: "", limit: "", adminName: "", adminEmail: "" });
+  const [errors, setErrors] = useState({});
+  const [creating, setCreating] = useState(false);
+  const [editLimit, setEditLimit] = useState(null); // { id, value }
+  const [savingLimit, setSavingLimit] = useState(false);
+
+  useEffect(() => { load(); }, []);
+
+  async function load() {
+    setLoading(true);
+    const [{ data: branchRows }, { data: deviceRows }] = await Promise.all([
+      supabase.from("branches").select("*").order("created_at", { ascending: false }),
+      supabase.from("devices").select("branch_id"),
+    ]);
+    setBranches(branchRows || []);
+    const counts = {};
+    (deviceRows || []).forEach((d) => { counts[d.branch_id] = (counts[d.branch_id] || 0) + 1; });
+    setDeviceCounts(counts);
+    setLoading(false);
+  }
+
+  function openAdd() { setDraft({ name: "", limit: "", adminName: "", adminEmail: "" }); setErrors({}); setDrawerOpen(true); }
+
+  async function createBranch() {
+    const e = {};
+    if (!draft.name.trim()) e.name = "Enter a branch name.";
+    if (!draft.limit || Number(draft.limit) <= 0) e.limit = "Enter a device license limit.";
+    if (!draft.adminName.trim()) e.adminName = "Enter the branch admin's name.";
+    if (!draft.adminEmail.trim()) e.adminEmail = "Enter the branch admin's email.";
+    setErrors(e);
+    if (Object.keys(e).length) return;
+
+    setCreating(true);
+    const { data: branch, error: branchErr } = await supabase
+      .from("branches")
+      .insert({ name: draft.name.trim(), device_license_limit: Number(draft.limit) })
+      .select()
+      .single();
+    if (branchErr) { setCreating(false); setErrors({ form: branchErr.message }); return; }
+
+    const { error: brandingErr } = await supabase.from("app_branding").insert({ branch_id: branch.id, name: draft.name.trim() });
+    if (brandingErr) { setCreating(false); setErrors({ form: brandingErr.message }); return; }
+
+    const { data: inviteData, error: inviteErr } = await supabase.functions.invoke("invite-admin-user", {
+      body: { name: draft.adminName.trim(), email: draft.adminEmail.trim(), role: "Owner", invited_by: email, branch_id: branch.id },
+    });
+    setCreating(false);
+    if (inviteErr || !inviteData?.success) {
+      setErrors({ form: inviteData?.reason || "Branch created, but inviting the admin failed. Add them from Settings → Account Management once you switch into that branch." });
+      setDrawerOpen(false);
+      load();
+      return;
+    }
+    setDrawerOpen(false);
+    load();
+  }
+
+  async function saveLimit() {
+    if (!editLimit || !editLimit.value || Number(editLimit.value) < 0) return;
+    setSavingLimit(true);
+    await supabase.from("branches").update({ device_license_limit: Number(editLimit.value) }).eq("id", editLimit.id);
+    setSavingLimit(false);
+    setEditLimit(null);
+    load();
+  }
+
+  return (
+    <div style={S.appShell}>
+      <GlobalStyle />
+      <header style={S.topbar}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={S.logoMark}>S</div>
+          <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>Super Admin</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+          {canSwitchToBranch && (
+            <button style={S.secondaryBtn} onClick={onSwitchToBranch}>
+              <Smartphone size={14} /> My Branch
+            </button>
+          )}
+          <span style={{ fontSize: 13, color: "#6B7280" }}>{email}</span>
+          <button style={S.logoutBtn} onClick={() => supabase.auth.signOut()}>
+            <LogOut size={14} /> Log out
+          </button>
+        </div>
+      </header>
+
+      <main style={{ ...S.main, maxWidth: 960, margin: "0 auto", width: "100%" }}>
+        <PageHeader eyebrow="Super Admin" title="Branches" count={branches.length}>
+          <button style={S.primaryBtn} onClick={openAdd}><Plus size={16} /> Add branch</button>
+        </PageHeader>
+        <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 560 }}>
+          Each branch is an independent vendor installation — its own devices, staff and settings. Set how many device licenses a branch is allowed to use.
+        </p>
+
+        <div style={S.tableCard}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Branch", "License limit", "Used", "Remaining", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
+              {!loading && branches.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No branches yet.</td></tr>}
+              {branches.map((b) => {
+                const used = deviceCounts[b.id] || 0;
+                const remaining = Math.max(b.device_license_limit - used, 0);
+                const editing = editLimit?.id === b.id;
+                return (
+                  <tr key={b.id} style={S.tr}>
+                    <td style={S.td}>{b.name}</td>
+                    <td style={S.td}>
+                      {editing ? (
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input
+                            style={{ ...S.input, width: 90, padding: "6px 10px" }}
+                            type="number"
+                            min="0"
+                            value={editLimit.value}
+                            onChange={(e) => setEditLimit({ ...editLimit, value: e.target.value })}
+                          />
+                          <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveLimit} disabled={savingLimit}>Save</button>
+                          <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditLimit(null)}>Cancel</button>
+                        </div>
+                      ) : (
+                        <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditLimit({ id: b.id, value: String(b.device_license_limit) })}>
+                          {b.device_license_limit} <Pencil size={12} color="#9AA1AE" />
+                        </span>
+                      )}
+                    </td>
+                    <td style={S.td}>{used}</td>
+                    <td style={S.td}>{remaining}</td>
+                    <td style={{ ...S.td, textAlign: "right" }} className="mono">{new Date(b.created_at).toLocaleDateString()}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </main>
+
+      {drawerOpen && (
+        <Drawer title="Add branch" onClose={() => setDrawerOpen(false)}>
+          <Field label="Branch name" error={errors.name}><input style={S.input} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Lahore Mobiles" /></Field>
+          <Field label="Device license limit" error={errors.limit}><input style={S.input} type="number" min="1" value={draft.limit} onChange={(e) => setDraft({ ...draft, limit: e.target.value })} placeholder="e.g. 200" /></Field>
+          <Field label="Branch admin name" error={errors.adminName}><input style={S.input} value={draft.adminName} onChange={(e) => setDraft({ ...draft, adminName: e.target.value })} placeholder="Jordan Lee" /></Field>
+          <Field label="Branch admin email" error={errors.adminEmail}><input style={S.input} value={draft.adminEmail} onChange={(e) => setDraft({ ...draft, adminEmail: e.target.value })} placeholder="owner@branch.com" /></Field>
+          {errors.form && <p style={{ fontSize: 12, color: "#D6414C", margin: "0 0 12px" }}>{errors.form}</p>}
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button style={{ ...S.primaryBtn, opacity: creating ? 0.7 : 1 }} onClick={createBranch} disabled={creating}>
+              {creating ? "Creating…" : "Create branch"}
+            </button>
+            <button style={S.secondaryBtn} onClick={() => setDrawerOpen(false)}>Cancel</button>
+          </div>
+        </Drawer>
       )}
     </div>
   );
