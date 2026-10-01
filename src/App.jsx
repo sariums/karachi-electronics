@@ -42,6 +42,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [tab, setTab] = useState("dashboard");
+  const [deviceSettingsTab, setDeviceSettingsTab] = useState("enroll");
   const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
 
   async function loadBranding() {
@@ -76,9 +77,9 @@ export default function App() {
         <div style={S.appBody}>
           <Sidebar tab={tab} setTab={setTab} />
           <main style={S.main}>
-            {tab === "dashboard" && <Dashboard />}
+            {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
             {tab === "devices" && <Devices />}
-            {tab === "deviceSettings" && <DeviceSettingsPage />}
+            {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
             {tab === "sendMessage" && <SendMessagePage />}
             {tab === "generalSettings" && <GeneralSettingsPage />}
             {tab === "roles" && <RolesList />}
@@ -274,100 +275,195 @@ function Sidebar({ tab, setTab }) {
 
 /* ---------------- DASHBOARD ---------------- */
 
-function Dashboard() {
-  const [stats, setStats] = useState({ devices: 0, locked: 0, overdue: 0 });
+function daysAgoISO(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
+function QuickOpTile({ icon: Icon, label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        gap: 10, padding: "18px 8px", borderRadius: 10, border: "1px solid #E6E8EC", background: "#fff",
+        cursor: "pointer", fontSize: 11.5, color: "#374151", textAlign: "center", lineHeight: 1.3,
+      }}
+    >
+      <div style={{ width: 38, height: 38, borderRadius: "50%", border: "1px solid #E6E8EC", display: "flex", alignItems: "center", justifyContent: "center", color: "#9AA1AE", flexShrink: 0 }}>
+        <Icon size={17} />
+      </div>
+      {label}
+    </button>
+  );
+}
+
+function Dashboard({ setTab, setDeviceSettingsTab }) {
+  const [devices, setDevices] = useState([]);
+  const [removalLog, setRemovalLog] = useState([]);
   const [overdueList, setOverdueList] = useState([]);
-  const [chartData, setChartData] = useState([]);
+  const [overdueCount, setOverdueCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [licenseWarningValue, setLicenseWarningValue] = useState(null);
+  const [rangeFrom, setRangeFrom] = useState(daysAgoISO(29));
+  const [rangeTo, setRangeTo] = useState(daysAgoISO(0));
 
   useEffect(() => {
     load();
-    loadChartData();
     supabase.from("app_branding").select("license_warning_value").eq("id", 1).maybeSingle()
       .then(({ data }) => setLicenseWarningValue(data?.license_warning_value ?? null));
   }, []);
 
   async function load() {
     setLoading(true);
-    const today = new Date().toISOString().slice(0, 10);
+    const today = daysAgoISO(0);
 
-    const [{ count: deviceCount }, { count: lockedCount }] = await Promise.all([
-      supabase.from("devices").select("*", { count: "exact", head: true }),
-      supabase.from("devices").select("*", { count: "exact", head: true }).eq("is_locked", true),
+    const [{ data: devs }, { data: removals }, { data: overdue }, { count: overdueTotal }] = await Promise.all([
+      supabase.from("devices").select("id, provisioned_at, last_seen_at, is_locked"),
+      supabase.from("device_removal_log").select("removed_at"),
+      supabase
+        .from("payments")
+        .select("id, due_date, amount, status, installment_plans(device_id, devices(device_model, imei))")
+        .neq("status", "Paid")
+        .lt("due_date", today)
+        .order("due_date", { ascending: true })
+        .limit(10),
+      supabase.from("payments").select("*", { count: "exact", head: true }).neq("status", "Paid").lt("due_date", today),
     ]);
 
-    const { data: overdue } = await supabase
-      .from("payments")
-      .select("id, due_date, amount, status, installment_plans(device_id, devices(device_model, imei))")
-      .neq("status", "Paid")
-      .lt("due_date", today)
-      .order("due_date", { ascending: true })
-      .limit(10);
-
-    setStats({
-      devices: deviceCount || 0,
-      locked: lockedCount || 0,
-      overdue: (overdue || []).length,
-    });
+    setDevices(devs || []);
+    setRemovalLog(removals || []);
     setOverdueList(overdue || []);
+    setOverdueCount(overdueTotal || 0);
     setLoading(false);
   }
 
-  async function loadChartData() {
-    const days = 30;
-    const start = new Date();
-    start.setDate(start.getDate() - (days - 1));
-    const startISO = start.toISOString().slice(0, 10);
+  const totalLicenses = TOTAL_DEVICE_LICENSES;
+  const activatedDevices = devices.filter((d) => d.last_seen_at).length;
+  const pendingDevices = devices.length - activatedDevices;
+  const remainingLicenses = Math.max(totalLicenses - devices.length, 0);
+  const activeDevices = devices.length;
+  const removedDevices = removalLog.length;
 
-    const [{ data: devs }, { data: events }] = await Promise.all([
-      supabase.from("devices").select("provisioned_at").gte("provisioned_at", startISO),
-      supabase.from("device_events").select("event_type, occurred_at").gte("occurred_at", startISO),
-    ]);
+  const yesterday = daysAgoISO(1);
+  function inLastNDays(dateStr, n) {
+    if (!dateStr) return false;
+    const d = dateStr.slice(0, 10);
+    return d >= daysAgoISO(n - 1) && d <= daysAgoISO(0);
+  }
+  const activatedYesterday = devices.filter((d) => d.last_seen_at && (d.provisioned_at || "").slice(0, 10) === yesterday).length;
+  const activated7d = devices.filter((d) => d.last_seen_at && inLastNDays(d.provisioned_at, 7)).length;
+  const activated30d = devices.filter((d) => d.last_seen_at && inLastNDays(d.provisioned_at, 30)).length;
 
+  const chartData = useMemo(() => {
+    const start = new Date(rangeFrom);
+    const end = new Date(rangeTo);
+    const days = Math.max(1, Math.round((end - start) / 86400000) + 1);
     const buckets = {};
     for (let i = 0; i < days; i++) {
       const d = new Date(start);
       d.setDate(d.getDate() + i);
-      buckets[d.toISOString().slice(0, 10)] = { enrolled: 0, locked: 0, unlocked: 0 };
+      buckets[d.toISOString().slice(0, 10)] = { enrolled: 0, activated: 0, removed: 0 };
     }
-    (devs || []).forEach((d) => {
+    devices.forEach((d) => {
       const key = (d.provisioned_at || "").slice(0, 10);
-      if (buckets[key]) buckets[key].enrolled++;
+      if (buckets[key]) {
+        buckets[key].enrolled++;
+        if (d.last_seen_at) buckets[key].activated++;
+      }
     });
-    (events || []).forEach((e) => {
-      const key = (e.occurred_at || "").slice(0, 10);
-      if (!buckets[key]) return;
-      if (e.event_type === "LOCK") buckets[key].locked++;
-      else if (e.event_type === "UNLOCK") buckets[key].unlocked++;
+    removalLog.forEach((r) => {
+      const key = (r.removed_at || "").slice(0, 10);
+      if (buckets[key]) buckets[key].removed++;
     });
-    setChartData(Object.keys(buckets).sort().map((key) => ({ date: key, ...buckets[key] })));
+    return Object.keys(buckets).sort().map((key) => ({ date: key, ...buckets[key] }));
+  }, [devices, removalLog, rangeFrom, rangeTo]);
+
+  function exportChart() {
+    const header = ["Date", "Enrolled", "Activated", "Removed"];
+    const rows = chartData.map((d) => [d.date, d.enrolled, d.activated, d.removed]);
+    const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "device-state.csv";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
-  const remainingLicenses = TOTAL_DEVICE_LICENSES - stats.devices;
+  function goToDeviceSettings(settingsTab) {
+    setDeviceSettingsTab(settingsTab);
+    setTab("deviceSettings");
+  }
+
   const licenseWarning = !loading && licenseWarningValue != null && remainingLicenses <= licenseWarningValue;
 
   return (
     <div>
-      <PageHeader eyebrow="Overview" title="Dashboard" />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+        <PageHeader eyebrow="Overview" title="Dashboard" />
+        <span style={{ fontSize: 12, color: "#9AA1AE" }}>Date based on device local time</span>
+      </div>
+
       {licenseWarning && (
         <div style={{
           display: "flex", alignItems: "center", gap: 10, background: "#FDEBEC", border: "1px solid #F4B7BC",
-          color: "#B0222D", fontSize: 13, borderRadius: 10, padding: "12px 16px", marginBottom: 20,
+          color: "#B0222D", fontSize: 13, borderRadius: 10, padding: "12px 16px", margin: "-16px 0 20px",
         }}>
           <Bell size={16} />
-          Only <strong>{Math.max(remainingLicenses, 0)}</strong> of {TOTAL_DEVICE_LICENSES} device licenses remaining. Add more licenses soon.
+          Only <strong>{remainingLicenses}</strong> of {totalLicenses} device licenses remaining. Add more licenses soon.
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 28 }}>
-        <StatCard label="Total devices" value={stats.devices} />
-        <StatCard label="Locked now" value={stats.locked} accent="#D6414C" />
-        <StatCard label="Overdue payments" value={stats.overdue} accent="#F2A93C" />
-        <StatCard label="Licenses remaining" value={`${Math.max(remainingLicenses, 0)} / ${TOTAL_DEVICE_LICENSES}`} accent={licenseWarning ? "#D6414C" : undefined} />
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <StatCard label="Total licenses" value={totalLicenses} />
+        <StatCard label="Remaining licenses" value={remainingLicenses} accent={licenseWarning ? "#D6414C" : undefined} />
+        <StatCard label="Activated licenses" value={activatedDevices} />
+        <StatCard label="Pending licenses" value={pendingDevices} />
+        <StatCard label="Active devices" value={activeDevices} />
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 28 }}>
+        <StatCard label="Removed devices" value={removedDevices} />
+        <StatCard label="Activated (yesterday)" value={activatedYesterday} />
+        <StatCard label="Activated (last 7d)" value={activated7d} />
+        <StatCard label="Activated (last 30d)" value={activated30d} />
       </div>
 
-      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Activity — last 30 days</h3>
-      <GrowthChart data={chartData} />
+      <div style={{ display: "flex", gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ flex: "2 1 440px", minWidth: 300 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+            <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: 0 }}>Device State</h3>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="date" style={{ ...S.input, width: 140, padding: "6px 10px" }} value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} />
+              <span style={{ fontSize: 12, color: "#9AA1AE" }}>to</span>
+              <input type="date" style={{ ...S.input, width: 140, padding: "6px 10px" }} value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} />
+              <button style={S.secondaryBtn} onClick={exportChart}>Export</button>
+            </div>
+          </div>
+          <GrowthChart
+            data={chartData}
+            series={[
+              { key: "enrolled", label: "Enrolled", color: "#2F6FED" },
+              { key: "activated", label: "Activated", color: "#0E9488" },
+              { key: "removed", label: "Removed", color: "#F2A93C" },
+            ]}
+          />
+        </div>
+
+        <div style={{ flex: "1 1 300px", minWidth: 260 }}>
+          <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Quick Operations</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+            <QuickOpTile icon={Pencil} label="Enroll Device" onClick={() => goToDeviceSettings("enroll")} />
+            <QuickOpTile icon={RefreshCw} label="Update Device Expiration" onClick={() => goToDeviceSettings("expire")} />
+            <QuickOpTile icon={Unlock} label="Removal" onClick={() => goToDeviceSettings("restriction")} />
+            <QuickOpTile icon={KeyRound} label="PIN Unlock" onClick={() => setTab("devices")} />
+            <QuickOpTile icon={Trash2} label="Unenroll Device" onClick={() => goToDeviceSettings("unenroll")} />
+            <QuickOpTile icon={Smartphone} label="Device Enrollment Data" onClick={() => setTab("devices")} />
+          </div>
+        </div>
+      </div>
 
       <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "28px 0 12px" }}>Overdue this period</h3>
       <div style={S.tableCard}>
@@ -384,6 +480,9 @@ function Dashboard() {
                 <td style={S.td}>{money(p.amount)}</td>
               </tr>
             ))}
+            {!loading && overdueCount > overdueList.length && (
+              <tr><td colSpan={4} style={{ ...S.emptyCell, fontSize: 12 }}>+ {overdueCount - overdueList.length} more overdue payment(s) not shown — see Devices → Installment plans.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -751,8 +850,9 @@ function Devices() {
     load();
   }
 
-  async function performDelete(id) {
-    await supabase.from("devices").delete().eq("id", id);
+  async function performDelete(device) {
+    await supabase.from("devices").delete().eq("id", device.id);
+    await supabase.from("device_removal_log").insert({ device_model: device.device_model || null, imei: device.imei || null });
     setConfirmDelete(null);
     load();
   }
@@ -1042,7 +1142,7 @@ function Devices() {
         <ConfirmDialog
           title="Remove device"
           message={`${confirmDelete.device_model || confirmDelete.imei || "This device"} and its installment plans/payment history will be removed. This can't be undone.`}
-          onConfirm={() => performDelete(confirmDelete.id)}
+          onConfirm={() => performDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
         />
       )}
@@ -1149,8 +1249,8 @@ function UploadXlsBox() {
   );
 }
 
-function DeviceSettingsPage() {
-  const [activeTab, setActiveTab] = useState("enroll");
+function DeviceSettingsPage({ initialTab }) {
+  const [activeTab, setActiveTab] = useState(initialTab || "enroll");
   const [unitType, setUnitType] = useState("single");
   const [imei, setImei] = useState("");
   const [deviceTag, setDeviceTag] = useState("");
@@ -1248,6 +1348,7 @@ function DeviceSettingsPage() {
 
   async function performUnenroll() {
     await supabase.from("devices").delete().eq("id", unenrollConfirm.id);
+    await supabase.from("device_removal_log").insert({ device_model: unenrollConfirm.device_model || null, imei: unenrollConfirm.imei || null });
     setUnenrollConfirm(null);
     setImei("");
     setUnenrollMsg("Device unenrolled — fully removed from the app.");
@@ -2470,21 +2571,22 @@ function StatCard({ label, value, accent }) {
   );
 }
 
-function GrowthChart({ data }) {
+function GrowthChart({ data, series }) {
   if (!data.length) return null;
   const width = 700, height = 200, padL = 10, padR = 10, padT = 10, padB = 24;
   const innerW = width - padL - padR, innerH = height - padT - padB;
-  const maxVal = Math.max(1, ...data.flatMap((d) => [d.enrolled, d.locked, d.unlocked]));
 
-  const xFor = (i) => padL + (data.length === 1 ? 0 : (i / (data.length - 1)) * innerW);
-  const yFor = (v) => padT + innerH - (v / maxVal) * innerH;
-  const lineFor = (key) => data.map((d, i) => `${i === 0 ? "M" : "L"} ${xFor(i).toFixed(1)},${yFor(d[key]).toFixed(1)}`).join(" ");
-
-  const series = [
+  series = series || [
     { key: "enrolled", label: "Enrolled", color: "#F2A93C" },
     { key: "locked", label: "Locked", color: "#D6414C" },
     { key: "unlocked", label: "Unlocked", color: "#0E9488" },
   ];
+  const maxVal = Math.max(1, ...data.flatMap((d) => series.map((s) => d[s.key] || 0)));
+
+  const xFor = (i) => padL + (data.length === 1 ? 0 : (i / (data.length - 1)) * innerW);
+  const yFor = (v) => padT + innerH - (v / maxVal) * innerH;
+  const lineFor = (key) => data.map((d, i) => `${i === 0 ? "M" : "L"} ${xFor(i).toFixed(1)},${yFor(d[key] || 0).toFixed(1)}`).join(" ");
+
   const labelEvery = Math.max(1, Math.ceil(data.length / 6));
 
   return (
