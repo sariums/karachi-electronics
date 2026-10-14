@@ -3,7 +3,7 @@ import {
   Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi,
+  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
@@ -1698,6 +1698,8 @@ function InstallationPage() {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [qrDataUrl, setQrDataUrl] = useState("");
+  const [method, setMethod] = useState("qr"); // "qr" | "usb"
+  const USB_INSTALLER_URL = "https://jslhwzsozfrgwptasjsz.supabase.co/storage/v1/object/public/releases/karachi-electronics-usb-installer.zip";
 
   useEffect(() => {
     if (!branchId) return;
@@ -1759,6 +1761,15 @@ function InstallationPage() {
     setSaveMsg(error ? error.message : "Saved.");
   }
 
+  const usbSteps = [
+    { title: "Download & extract the installer", text: "Click the button above to download the USB Installer, then unzip (extract) the folder on this computer." },
+    { title: "Reset or unbox the phone", text: "Factory reset it (Settings → System → Reset options → Erase all data) or use a brand-new phone — there must be NO Google account signed in." },
+    { title: "Turn on USB debugging", text: "On the phone: Settings → About phone → tap \"Build number\" 7 times, then Settings → System → Developer options → turn on \"USB debugging\"." },
+    { title: "Connect the phone by USB", text: "Plug the phone into this computer with a USB cable. When the phone asks \"Allow USB debugging?\", tap ALLOW." },
+    { title: "Run the installer", text: "In the extracted folder, double-click \"Install on Mac.command\" (Mac) or \"Install on Windows.bat\" (Windows). A black window opens and does everything — wait until it says DONE." },
+    { title: "First-time security warning (normal)", text: "Mac: if blocked, right-click the file → Open → Open. Windows: if \"Windows protected your PC\" appears, click More info → Run anyway." },
+  ];
+
   const steps = [
     { title: "Reset or unbox the phone", text: "Factory reset it (Settings → System → Reset options → Erase all data) or use a brand-new phone that hasn't been set up yet." },
     { title: "Open the QR scanner", text: "On the first \"Welcome\" screen — before choosing Wi-Fi or signing in — tap anywhere on the screen 6 times in a row. This opens the camera for QR code setup." },
@@ -1771,7 +1782,58 @@ function InstallationPage() {
   return (
     <div>
       <PageHeader eyebrow="Device Management" title="Installation" />
-      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 24px", maxWidth: 620 }}>
+
+      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid #E6E8EC", margin: "-20px 0 24px", maxWidth: 620 }}>
+        {[{ id: "qr", label: "Via QR" }, { id: "usb", label: "Via USB" }].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setMethod(t.id)}
+            style={{
+              padding: "10px 18px", fontSize: 13, fontWeight: 600, background: "transparent",
+              border: "none", borderBottom: method === t.id ? "2px solid #F2A93C" : "2px solid transparent",
+              color: method === t.id ? "#14161C" : "#9AA1AE", cursor: "pointer",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {method === "usb" && (
+        <div>
+          <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 20px", maxWidth: 620 }}>
+            Install over a USB cable instead of a QR scan. Download the installer, connect a factory-reset phone, and double-click — it installs the lock app and sets it as device owner automatically. Works on any Mac or Windows computer (adb is included).
+          </p>
+          <div style={{ ...S.tableCard, padding: 24, maxWidth: 620, marginBottom: 24 }}>
+            <h3 className="serif" style={{ fontSize: 17, color: "#14161C", margin: "0 0 6px" }}>Download the USB Installer</h3>
+            <p style={{ fontSize: 12.5, color: "#6B7280", margin: "0 0 16px", lineHeight: 1.6 }}>
+              One download works for both Mac and Windows. It always installs the latest app version.
+            </p>
+            <a href={USB_INSTALLER_URL} download style={{ ...S.primaryBtn, display: "inline-flex", alignItems: "center", gap: 8, textDecoration: "none" }}>
+              <Download size={15} /> Download USB Installer (Mac + Windows)
+            </a>
+          </div>
+          <div style={{ ...S.tableCard, padding: 24, maxWidth: 620 }}>
+            <h3 className="serif" style={{ fontSize: 17, color: "#14161C", margin: "0 0 16px" }}>Step-by-step: installing over USB</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {usbSteps.map((s, i) => (
+                <div key={i} style={{ display: "flex", gap: 14 }}>
+                  <div style={{ flex: "0 0 28px", height: 28, borderRadius: "50%", background: "#F2A93C", color: "#2C1E06", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13 }}>
+                    {i + 1}
+                  </div>
+                  <div>
+                    <p style={{ fontWeight: 600, fontSize: 13.5, margin: "0 0 2px", color: "#14161C" }}>{s.title}</p>
+                    <p style={{ fontSize: 12.5, color: "#6B7280", margin: 0, lineHeight: 1.6 }}>{s.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {method === "qr" && (<>
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "0 0 24px", maxWidth: 620 }}>
         Scan this QR code on a factory-reset phone to automatically install the lock app and set it as device owner — the same bootstrap APK flow used for every new device.
       </p>
 
@@ -1850,6 +1912,7 @@ function InstallationPage() {
           ))}
         </div>
       </div>
+      </>)}
     </div>
   );
 }
