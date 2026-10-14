@@ -36,9 +36,12 @@ function formatRelativeTime(iso) {
 // Company-wide default branding shown before a user signs in (the login screen has
 // no session/branch yet, so per-branch branding can't have loaded). After login,
 // loadProfile() overrides this with the signed-in branch's own branding.
+// MGUARD is the product / super-admin (system) brand shown before sign-in and in the
+// super admin panel. A branch (e.g. Karachi Electronics) overrides this with its own
+// branding after a branch admin signs in (see loadProfile).
 const DEFAULT_BRANDING = {
-  name: "Karachi Electronics",
-  iconUrl: "https://jslhwzsozfrgwptasjsz.supabase.co/storage/v1/object/public/branding/icon-1790728538879.png",
+  name: "MGUARD",
+  iconUrl: "/mguard-logo.svg",
 };
 
 const BrandingContext = createContext({ ...DEFAULT_BRANDING, reload: () => {} });
@@ -3196,8 +3199,9 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
       <GlobalStyle />
       <header style={S.topbar}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }} data-tour="sa-brand">
-          <div style={S.logoMark}>S</div>
-          <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>Super Admin</span>
+          <img src="/mguard-logo.svg" alt="MGUARD" style={{ width: 28, height: 28, borderRadius: 7, flexShrink: 0 }} />
+          <span className="serif" style={{ fontSize: 17, color: "#14161C" }}>MGUARD</span>
+          <span style={{ fontSize: 11, color: "#9AA1AE", fontWeight: 600, letterSpacing: 0.3, border: "1px solid #E6E8EC", borderRadius: 6, padding: "2px 7px" }}>Super Admin</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
           <button style={S.tourBtn} onClick={() => setTourOpen(true)}>New User Tour</button>
