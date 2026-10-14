@@ -33,7 +33,15 @@ function formatRelativeTime(iso) {
   return `${days}d ago`;
 }
 
-const BrandingContext = createContext({ name: "Northline", iconUrl: null, reload: () => {} });
+// Company-wide default branding shown before a user signs in (the login screen has
+// no session/branch yet, so per-branch branding can't have loaded). After login,
+// loadProfile() overrides this with the signed-in branch's own branding.
+const DEFAULT_BRANDING = {
+  name: "Karachi Electronics",
+  iconUrl: "https://jslhwzsozfrgwptasjsz.supabase.co/storage/v1/object/public/branding/icon-1790728538879.png",
+};
+
+const BrandingContext = createContext({ ...DEFAULT_BRANDING, reload: () => {} });
 const BranchContext = createContext({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, reload: () => {} });
 
 export default function App() {
@@ -45,7 +53,7 @@ export default function App() {
   const [sendMessageDeviceId, setSendMessageDeviceId] = useState(null);
   const [sendMessageTab, setSendMessageTab] = useState("popups");
   const [sendMessageImei, setSendMessageImei] = useState("");
-  const [branding, setBranding] = useState({ name: "Northline", iconUrl: null });
+  const [branding, setBranding] = useState(DEFAULT_BRANDING);
   const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0 });
   const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
 
