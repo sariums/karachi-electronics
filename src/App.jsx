@@ -2976,7 +2976,7 @@ function SuperAdminSidebar({ saTab, setSaTab }) {
   );
 }
 
-function SuperAdminOverview({ branches, deviceCounts, loading }) {
+function SuperAdminOverview({ branches, deviceCounts, branchAdmins = {}, loading }) {
   const totalBranches = branches.length;
   const totalCapacity = branches.reduce((sum, b) => sum + (b.device_license_limit || 0), 0);
   const totalUsed = branches.reduce((sum, b) => sum + (deviceCounts[b.id] || 0), 0);
@@ -2995,16 +2995,27 @@ function SuperAdminOverview({ branches, deviceCounts, loading }) {
       <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Branches at a glance</h3>
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Branch", "License limit", "Used", "Remaining"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Branch", "Admin email", "License limit", "Used", "Remaining"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={4} style={S.emptyCell}>Loading…</td></tr>}
-            {!loading && branches.length === 0 && <tr><td colSpan={4} style={S.emptyCell}>No branches yet.</td></tr>}
+            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && branches.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No branches yet.</td></tr>}
             {branches.map((b) => {
               const used = deviceCounts[b.id] || 0;
               const remaining = Math.max(b.device_license_limit - used, 0);
+              const emails = branchAdmins[b.id] || [];
               return (
                 <tr key={b.id} style={S.tr}>
                   <td style={S.td}>{b.name}</td>
+                  <td style={S.td}>
+                    {emails.length ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span className="mono">{emails[0]}</span>
+                        {emails.length > 1 && (
+                          <span style={{ fontSize: 11, color: "#9AA1AE" }} title={emails.join(", ")}>+{emails.length - 1}</span>
+                        )}
+                      </span>
+                    ) : <span style={{ color: "#9AA1AE" }}>—</span>}
+                  </td>
                   <td style={S.td}>{b.device_license_limit}</td>
                   <td style={S.td}>{used}</td>
                   <td style={S.td}>{remaining}</td>
@@ -3105,6 +3116,7 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
   const [selectedBranch, setSelectedBranch] = useState(null);
   const [branches, setBranches] = useState([]);
   const [deviceCounts, setDeviceCounts] = useState({});
+  const [branchAdmins, setBranchAdmins] = useState({}); // branch_id -> [email]
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState({ name: "", limit: "", adminName: "", adminEmail: "" });
@@ -3129,14 +3141,24 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
 
   async function load() {
     setLoading(true);
-    const [{ data: branchRows }, { data: deviceRows }] = await Promise.all([
+    const [{ data: branchRows }, { data: deviceRows }, { data: adminRows }] = await Promise.all([
       supabase.from("branches").select("*").order("created_at", { ascending: false }),
       supabase.from("devices").select("branch_id"),
+      supabase.from("admin_users").select("branch_id, email, role"),
     ]);
     setBranches(branchRows || []);
     const counts = {};
     (deviceRows || []).forEach((d) => { counts[d.branch_id] = (counts[d.branch_id] || 0) + 1; });
     setDeviceCounts(counts);
+    const admins = {};
+    (adminRows || []).forEach((a) => {
+      if (!a.branch_id || !a.email) return;
+      if (!admins[a.branch_id]) admins[a.branch_id] = [];
+      // Put the branch Owner first so it shows as the primary admin email.
+      if (a.role === "Owner") admins[a.branch_id].unshift(a.email);
+      else admins[a.branch_id].push(a.email);
+    });
+    setBranchAdmins(admins);
     setLoading(false);
   }
 
@@ -3221,7 +3243,7 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
       <div style={S.appBody}>
         <SuperAdminSidebar saTab={saTab} setSaTab={(t) => { setSaTab(t); setSelectedBranch(null); }} />
         <main style={S.main}>
-          {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} loading={loading} />}
+          {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} branchAdmins={branchAdmins} loading={loading} />}
 
           {saTab === "branches" && selectedBranch && (
             <BranchDetail branch={selectedBranch} usedCount={deviceCounts[selectedBranch.id] || 0} onBack={() => setSelectedBranch(null)} />
@@ -3238,10 +3260,10 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
 
               <div style={S.tableCard} data-tour="sa-branches-table">
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead><tr>{["Branch", "License limit", "Used", "Remaining", "", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                  <thead><tr>{["Branch", "Admin email", "License limit", "Used", "Remaining", "", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
                   <tbody>
-                    {loading && <tr><td colSpan={6} style={S.emptyCell}>Loading…</td></tr>}
-                    {!loading && branches.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No branches yet.</td></tr>}
+                    {loading && <tr><td colSpan={7} style={S.emptyCell}>Loading…</td></tr>}
+                    {!loading && branches.length === 0 && <tr><td colSpan={7} style={S.emptyCell}>No branches yet.</td></tr>}
                     {branches.map((b) => {
                       const used = deviceCounts[b.id] || 0;
                       const remaining = Math.max(b.device_license_limit - used, 0);
@@ -3265,6 +3287,20 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
                                 {b.name} <Pencil size={12} color="#9AA1AE" />
                               </span>
                             )}
+                          </td>
+                          <td style={S.td}>
+                            {(() => {
+                              const emails = branchAdmins[b.id] || [];
+                              if (!emails.length) return <span style={{ color: "#9AA1AE" }}>—</span>;
+                              return (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                  <span className="mono">{emails[0]}</span>
+                                  {emails.length > 1 && (
+                                    <span style={{ fontSize: 11, color: "#9AA1AE" }} title={emails.join(", ")}>+{emails.length - 1}</span>
+                                  )}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td style={S.td}>
                             {editing ? (
