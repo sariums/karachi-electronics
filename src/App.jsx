@@ -150,6 +150,7 @@ export default function App() {
             <Sidebar tab={tab} setTab={setTab} />
             <main style={S.main}>
               {tab === "dashboard" && <Dashboard setTab={setTab} setDeviceSettingsTab={setDeviceSettingsTab} />}
+              {tab === "tickets" && <TicketsPage email={session.user.email} isSuperAdmin={false} branchId={profile.branchId} />}
               {tab === "devices" && (
                 <Devices
                   onSendMessage={(deviceId, msgTab, deviceImei) => {
@@ -309,6 +310,7 @@ function LoginScreen() {
 function Sidebar({ tab, setTab }) {
   const nav = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "tickets", label: "Support", icon: Ticket },
     {
       group: "Device Management", tourKey: "nav-device-management", icon: Smartphone, items: [
         { id: "devices", label: "Devices", icon: Smartphone },
@@ -3174,10 +3176,82 @@ function TicketBadge({ map, value }) {
   return <span style={{ background: c.bg, color: c.fg, fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, whiteSpace: "nowrap" }}>{value}</span>;
 }
 
-/** Super-admin-only ticket board: the owner logs issues/requests for the developer,
- * the developer (signed in via the super admin account for now) updates status and
- * replies. Backed by the `tickets` + `ticket_comments` tables. */
-function TicketsPage({ email }) {
+async function uploadTicketImage(file) {
+  const ext = ((file.name || "").split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from("ticket-images").upload(path, file, { upsert: false, contentType: file.type || "image/png" });
+  if (error) throw error;
+  return supabase.storage.from("ticket-images").getPublicUrl(path).data.publicUrl;
+}
+
+/** Upload area that accepts a chosen file, multiple files, AND a pasted screenshot
+ * (Ctrl+V from the snipping tool). Uploads to the ticket-images bucket and keeps the
+ * resulting public URLs in `images`. */
+function ImageAttach({ images, setImages }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function add(files) {
+    setErr("");
+    const imgs = [...files].filter((f) => f && f.type && f.type.startsWith("image/"));
+    if (!imgs.length) return;
+    setBusy(true);
+    try {
+      const urls = [];
+      for (const f of imgs) urls.push(await uploadTicketImage(f));
+      setImages((cur) => [...cur, ...urls]);
+    } catch (e) { setErr(e.message || "Upload failed"); }
+    setBusy(false);
+  }
+  return (
+    <div
+      onPaste={(ev) => {
+        const files = [...(ev.clipboardData?.items || [])].filter((i) => i.type.startsWith("image/")).map((i) => i.getAsFile()).filter(Boolean);
+        if (files.length) { ev.preventDefault(); add(files); }
+      }}
+      style={{ border: "1px dashed #CBD2DC", borderRadius: 10, padding: 12, background: "#FAFBFC" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <button type="button" style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => inputRef.current?.click()}>
+          <Upload size={14} /> {busy ? "Uploading…" : "Add image"}
+        </button>
+        <span style={{ fontSize: 11.5, color: "#9AA1AE" }}>or paste a screenshot here with Ctrl+V</span>
+        <input ref={inputRef} type="file" accept="image/*" multiple style={{ display: "none" }} onChange={(ev) => add(ev.target.files)} />
+      </div>
+      {err && <p style={{ fontSize: 11.5, color: "#D6414C", margin: "6px 0 0" }}>{err}</p>}
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          {images.map((u, i) => (
+            <div key={u} style={{ position: "relative" }}>
+              <img src={u} alt="" style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid #E6E8EC" }} />
+              <button type="button" onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}
+                style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: 999, border: "none", background: "#14161C", color: "#fff", fontSize: 12, lineHeight: "18px", padding: 0, cursor: "pointer" }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only thumbnails that open the full image in a new tab. */
+function TicketImages({ images }) {
+  if (!images || images.length === 0) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+      {images.map((u) => (
+        <a key={u} href={u} target="_blank" rel="noreferrer">
+          <img src={u} alt="" style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid #E6E8EC" }} />
+        </a>
+      ))}
+    </div>
+  );
+}
+
+/** Ticket board. Super admin sees every branch's tickets and manages status; a branch
+ * admin sees and raises only their own branch's tickets. Both can attach images
+ * (upload or paste) and reply. Backed by the `tickets` + `ticket_comments` tables. */
+function TicketsPage({ email, isSuperAdmin = false, branchId = null, branches = [] }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -3189,6 +3263,9 @@ function TicketsPage({ email }) {
   const [comments, setComments] = useState([]);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
+  const [draftImages, setDraftImages] = useState([]);
+  const [replyImages, setReplyImages] = useState([]);
+  const branchName = (id) => branches.find((b) => b.id === id)?.name || "—";
 
   async function load() {
     setLoading(true);
@@ -3208,10 +3285,13 @@ function TicketsPage({ email }) {
       priority: draft.priority,
       status: "Open",
       created_by: email,
+      branch_id: isSuperAdmin ? null : branchId,
+      images: draftImages.length ? draftImages : null,
     });
     setCreating(false);
     if (error) { setErr(error.message); return; }
     setDraft({ title: "", description: "", priority: "Medium" });
+    setDraftImages([]);
     setAddOpen(false);
     load();
   }
@@ -3231,12 +3311,12 @@ function TicketsPage({ email }) {
   }
 
   async function addReply() {
-    if (!reply.trim() || !selected) return;
+    if ((!reply.trim() && replyImages.length === 0) || !selected) return;
     setSending(true);
-    const { error } = await supabase.from("ticket_comments").insert({ ticket_id: selected.id, body: reply.trim(), author: email });
+    const { error } = await supabase.from("ticket_comments").insert({ ticket_id: selected.id, body: reply.trim(), author: email, images: replyImages.length ? replyImages : null });
     await supabase.from("tickets").update({ updated_at: new Date().toISOString() }).eq("id", selected.id);
     setSending(false);
-    if (!error) { setReply(""); openTicket(selected); load(); }
+    if (!error) { setReply(""); setReplyImages([]); openTicket(selected); load(); }
   }
 
   async function deleteTicket(t) {
@@ -3247,13 +3327,17 @@ function TicketsPage({ email }) {
 
   const filtered = statusFilter === "all" ? tickets : tickets.filter((t) => t.status === statusFilter);
 
+  const cols = isSuperAdmin ? ["Title", "Branch", "Priority", "Status", "Updated", ""] : ["Title", "Priority", "Status", "Updated", ""];
+
   return (
     <div>
-      <PageHeader eyebrow="Super Admin" title="Tickets" count={tickets.length}>
+      <PageHeader eyebrow={isSuperAdmin ? "Super Admin" : "Support"} title="Tickets" count={tickets.length}>
         <button style={S.primaryBtn} onClick={() => { setErr(""); setAddOpen(true); }}><Plus size={16} /> New ticket</button>
       </PageHeader>
       <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 20px", maxWidth: 580 }}>
-        Log issues and requests for the developer here. This board is visible only in the Super Admin portal.
+        {isSuperAdmin
+          ? "Tickets raised by branches and by you. Update status, reply, and attach images."
+          : "Raise an issue or request to the developer. Attach screenshots (upload or paste with Ctrl+V) and track the reply here."}
       </p>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
@@ -3267,13 +3351,14 @@ function TicketsPage({ email }) {
 
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Title", "Priority", "Status", "Updated", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{cols.map((h, i) => <th key={i} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No tickets yet.</td></tr>}
+            {loading && <tr><td colSpan={cols.length} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={cols.length} style={S.emptyCell}>No tickets yet.</td></tr>}
             {filtered.map((t) => (
               <tr key={t.id} style={{ ...S.tr, cursor: "pointer" }} onClick={() => openTicket(t)}>
                 <td style={S.td}>{t.title}</td>
+                {isSuperAdmin && <td style={S.td}>{t.branch_id ? branchName(t.branch_id) : <span style={{ color: "#9AA1AE" }}>—</span>}</td>}
                 <td style={S.td}><TicketBadge map={TICKET_PRIORITY_STYLE} value={t.priority} /></td>
                 <td style={S.td}><TicketBadge map={TICKET_STATUS_STYLE} value={t.status} /></td>
                 <td style={S.td} className="mono">{new Date(t.updated_at || t.created_at).toLocaleDateString()}</td>
@@ -3289,12 +3374,13 @@ function TicketsPage({ email }) {
       {addOpen && (
         <Drawer title="New ticket" onClose={() => setAddOpen(false)}>
           <Field label="Title"><input style={S.input} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Short summary of the issue" /></Field>
-          <Field label="Description"><textarea style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit" }} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What's the issue or request? Steps, screenshots, etc." /></Field>
+          <Field label="Description"><textarea style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit" }} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What's the issue or request? Steps, etc." /></Field>
           <Field label="Priority">
             <select style={S.input} value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}>
               {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
           </Field>
+          <Field label="Images (optional)"><ImageAttach images={draftImages} setImages={setDraftImages} /></Field>
           {err && <p style={{ fontSize: 12.5, color: "#D6414C", margin: "4px 0 0" }}>{err}</p>}
           <button style={{ ...S.primaryBtn, marginTop: 12, opacity: creating ? 0.7 : 1 }} onClick={createTicket} disabled={creating}>{creating ? "Creating…" : "Create ticket"}</button>
         </Drawer>
@@ -3302,31 +3388,44 @@ function TicketsPage({ email }) {
 
       {selected && (
         <Drawer title={selected.title} onClose={() => setSelected(null)}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-            <select style={{ ...S.input, width: "auto" }} value={selected.status} onChange={(e) => updateTicket({ status: e.target.value })}>
-              {TICKET_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select style={{ ...S.input, width: "auto" }} value={selected.priority} onChange={(e) => updateTicket({ priority: e.target.value })}>
-              {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+            {isSuperAdmin ? (
+              <>
+                <select style={{ ...S.input, width: "auto" }} value={selected.status} onChange={(e) => updateTicket({ status: e.target.value })}>
+                  {TICKET_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+                <select style={{ ...S.input, width: "auto" }} value={selected.priority} onChange={(e) => updateTicket({ priority: e.target.value })}>
+                  {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </>
+            ) : (
+              <>
+                <TicketBadge map={TICKET_STATUS_STYLE} value={selected.status} />
+                <TicketBadge map={TICKET_PRIORITY_STYLE} value={selected.priority} />
+              </>
+            )}
+            {isSuperAdmin && selected.branch_id && <span style={{ fontSize: 12.5, color: "#6B7280" }}>Branch: {branchName(selected.branch_id)}</span>}
           </div>
           {selected.description && <p style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.6, whiteSpace: "pre-wrap", margin: "0 0 8px" }}>{selected.description}</p>}
-          <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "0 0 18px" }}>Raised by {selected.created_by || "—"} · {new Date(selected.created_at).toLocaleString()}</p>
+          <TicketImages images={selected.images} />
+          <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "10px 0 18px" }}>Raised by {selected.created_by || "—"} · {new Date(selected.created_at).toLocaleString()}</p>
 
           <h4 style={{ fontSize: 13, color: "#14161C", margin: "0 0 10px" }}>Replies</h4>
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
             {comments.length === 0 && <p style={{ fontSize: 12.5, color: "#9AA1AE", margin: 0 }}>No replies yet.</p>}
             {comments.map((c) => (
               <div key={c.id} style={{ background: "#F5F6F8", border: "1px solid #E6E8EC", borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ fontSize: 13.5, color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{c.body}</div>
+                {c.body && <div style={{ fontSize: 13.5, color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{c.body}</div>}
+                <TicketImages images={c.images} />
                 <div style={{ fontSize: 11, color: "#9AA1AE", marginTop: 6 }}>{c.author || "—"} · {new Date(c.created_at).toLocaleString()}</div>
               </div>
             ))}
           </div>
           <textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Write a reply…" />
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
-            <button style={{ ...S.secondaryBtn, padding: "8px 14px", color: "#D6414C" }} onClick={() => deleteTicket(selected)}>Delete</button>
-            <button style={{ ...S.primaryBtn, opacity: sending || !reply.trim() ? 0.6 : 1 }} onClick={addReply} disabled={sending || !reply.trim()}>{sending ? "Sending…" : "Reply"}</button>
+          <div style={{ marginTop: 10 }}><ImageAttach images={replyImages} setImages={setReplyImages} /></div>
+          <div style={{ display: "flex", justifyContent: isSuperAdmin ? "space-between" : "flex-end", alignItems: "center", marginTop: 12 }}>
+            {isSuperAdmin && <button style={{ ...S.secondaryBtn, padding: "8px 14px", color: "#D6414C" }} onClick={() => deleteTicket(selected)}>Delete</button>}
+            <button style={{ ...S.primaryBtn, opacity: sending || (!reply.trim() && replyImages.length === 0) ? 0.6 : 1 }} onClick={addReply} disabled={sending || (!reply.trim() && replyImages.length === 0)}>{sending ? "Sending…" : "Reply"}</button>
           </div>
         </Drawer>
       )}
@@ -3468,7 +3567,7 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
         <main style={S.main}>
           {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} branchAdmins={branchAdmins} loading={loading} />}
 
-          {saTab === "tickets" && <TicketsPage email={email} />}
+          {saTab === "tickets" && <TicketsPage email={email} isSuperAdmin={true} branches={branches} />}
 
           {saTab === "branches" && selectedBranch && (
             <BranchDetail branch={selectedBranch} usedCount={deviceCounts[selectedBranch.id] || 0} onBack={() => setSelectedBranch(null)} />
