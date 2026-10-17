@@ -2201,7 +2201,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
 
       {activeTab === "call" && (
         <div style={{ ...S.tableCard, marginTop: 24 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "18px 16px 16px", borderBottom: "1px solid #E6E8EC" }}>
             <div>
               <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: 0 }}>Recordings library</h3>
               <p style={{ fontSize: 12.5, color: "#6B7280", margin: "4px 0 0", maxWidth: 520 }}>
@@ -2222,7 +2222,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
               </label>
             </div>
           </div>
-          {recErr && <p style={{ fontSize: 12.5, color: "#D6414C", margin: "0 0 10px" }}>{recErr}</p>}
+          {recErr && <p style={{ fontSize: 12.5, color: "#D6414C", margin: 0, padding: "12px 16px 0" }}>{recErr}</p>}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>{["Name", "Preview", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
             <tbody>
