@@ -867,7 +867,13 @@ function Devices({ onSendMessage }) {
     }
     localStreamRef.current = localStream;
 
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const pc = new RTCPeerConnection({ iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      // TURN relays the audio when the two peers aren't on the same network (the usual
+      // case) — without it the call hangs on "Connecting…". Free public relay for now;
+      // use a dedicated TURN service for production reliability.
+      { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
+    ] });
     pcRef.current = pc;
     localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
 
