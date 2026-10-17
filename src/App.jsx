@@ -3,7 +3,7 @@ import {
   Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download, CheckCircle,
+  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download, CheckCircle, Ticket,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
@@ -3001,6 +3001,7 @@ function SuperAdminSidebar({ saTab, setSaTab }) {
   const nav = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
     { id: "branches", label: "Branches", icon: Smartphone },
+    { id: "tickets", label: "Tickets", icon: Ticket },
   ];
   return (
     <aside style={S.sidebar}>
@@ -3155,6 +3156,184 @@ function BranchDetail({ branch, usedCount, onBack }) {
   );
 }
 
+const TICKET_STATUSES = ["Open", "In Progress", "Resolved", "Closed"];
+const TICKET_PRIORITIES = ["Low", "Medium", "High"];
+const TICKET_STATUS_STYLE = {
+  "Open": { bg: "#FEF3E7", fg: "#B4690E" },
+  "In Progress": { bg: "#E7F0FE", fg: "#1E5FD6" },
+  "Resolved": { bg: "#E6F7EF", fg: "#1E8E5A" },
+  "Closed": { bg: "#F0F1F3", fg: "#6B7280" },
+};
+const TICKET_PRIORITY_STYLE = {
+  "High": { bg: "#FDEBEC", fg: "#D6414C" },
+  "Medium": { bg: "#FEF3E7", fg: "#B4690E" },
+  "Low": { bg: "#F0F1F3", fg: "#6B7280" },
+};
+function TicketBadge({ map, value }) {
+  const c = map[value] || { bg: "#F0F1F3", fg: "#6B7280" };
+  return <span style={{ background: c.bg, color: c.fg, fontSize: 11.5, fontWeight: 600, padding: "3px 9px", borderRadius: 999, whiteSpace: "nowrap" }}>{value}</span>;
+}
+
+/** Super-admin-only ticket board: the owner logs issues/requests for the developer,
+ * the developer (signed in via the super admin account for now) updates status and
+ * replies. Backed by the `tickets` + `ticket_comments` tables. */
+function TicketsPage({ email }) {
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [addOpen, setAddOpen] = useState(false);
+  const [draft, setDraft] = useState({ title: "", description: "", priority: "Medium" });
+  const [creating, setCreating] = useState(false);
+  const [err, setErr] = useState("");
+  const [selected, setSelected] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase.from("tickets").select("*").order("updated_at", { ascending: false });
+    setTickets(data || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function createTicket() {
+    setErr("");
+    if (!draft.title.trim()) { setErr("Enter a title."); return; }
+    setCreating(true);
+    const { error } = await supabase.from("tickets").insert({
+      title: draft.title.trim(),
+      description: draft.description.trim() || null,
+      priority: draft.priority,
+      status: "Open",
+      created_by: email,
+    });
+    setCreating(false);
+    if (error) { setErr(error.message); return; }
+    setDraft({ title: "", description: "", priority: "Medium" });
+    setAddOpen(false);
+    load();
+  }
+
+  async function openTicket(t) {
+    setSelected(t);
+    setComments([]);
+    const { data } = await supabase.from("ticket_comments").select("*").eq("ticket_id", t.id).order("created_at", { ascending: true });
+    setComments(data || []);
+  }
+
+  async function updateTicket(patch) {
+    if (!selected) return;
+    await supabase.from("tickets").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", selected.id);
+    setSelected({ ...selected, ...patch });
+    load();
+  }
+
+  async function addReply() {
+    if (!reply.trim() || !selected) return;
+    setSending(true);
+    const { error } = await supabase.from("ticket_comments").insert({ ticket_id: selected.id, body: reply.trim(), author: email });
+    await supabase.from("tickets").update({ updated_at: new Date().toISOString() }).eq("id", selected.id);
+    setSending(false);
+    if (!error) { setReply(""); openTicket(selected); load(); }
+  }
+
+  async function deleteTicket(t) {
+    await supabase.from("tickets").delete().eq("id", t.id);
+    if (selected?.id === t.id) setSelected(null);
+    load();
+  }
+
+  const filtered = statusFilter === "all" ? tickets : tickets.filter((t) => t.status === statusFilter);
+
+  return (
+    <div>
+      <PageHeader eyebrow="Super Admin" title="Tickets" count={tickets.length}>
+        <button style={S.primaryBtn} onClick={() => { setErr(""); setAddOpen(true); }}><Plus size={16} /> New ticket</button>
+      </PageHeader>
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 20px", maxWidth: 580 }}>
+        Log issues and requests for the developer here. This board is visible only in the Super Admin portal.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {["all", ...TICKET_STATUSES].map((s) => (
+          <button key={s} onClick={() => setStatusFilter(s)}
+            style={{ ...(statusFilter === s ? S.primaryBtn : S.secondaryBtn), padding: "6px 12px", fontSize: 12.5 }}>
+            {s === "all" ? "All" : s}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.tableCard}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Title", "Priority", "Status", "Updated", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No tickets yet.</td></tr>}
+            {filtered.map((t) => (
+              <tr key={t.id} style={{ ...S.tr, cursor: "pointer" }} onClick={() => openTicket(t)}>
+                <td style={S.td}>{t.title}</td>
+                <td style={S.td}><TicketBadge map={TICKET_PRIORITY_STYLE} value={t.priority} /></td>
+                <td style={S.td}><TicketBadge map={TICKET_STATUS_STYLE} value={t.status} /></td>
+                <td style={S.td} className="mono">{new Date(t.updated_at || t.created_at).toLocaleDateString()}</td>
+                <td style={{ ...S.td, textAlign: "right" }}>
+                  <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={(e) => { e.stopPropagation(); openTicket(t); }}>View</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {addOpen && (
+        <Drawer title="New ticket" onClose={() => setAddOpen(false)}>
+          <Field label="Title"><input style={S.input} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Short summary of the issue" /></Field>
+          <Field label="Description"><textarea style={{ ...S.input, minHeight: 110, resize: "vertical", fontFamily: "inherit" }} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What's the issue or request? Steps, screenshots, etc." /></Field>
+          <Field label="Priority">
+            <select style={S.input} value={draft.priority} onChange={(e) => setDraft({ ...draft, priority: e.target.value })}>
+              {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </Field>
+          {err && <p style={{ fontSize: 12.5, color: "#D6414C", margin: "4px 0 0" }}>{err}</p>}
+          <button style={{ ...S.primaryBtn, marginTop: 12, opacity: creating ? 0.7 : 1 }} onClick={createTicket} disabled={creating}>{creating ? "Creating…" : "Create ticket"}</button>
+        </Drawer>
+      )}
+
+      {selected && (
+        <Drawer title={selected.title} onClose={() => setSelected(null)}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            <select style={{ ...S.input, width: "auto" }} value={selected.status} onChange={(e) => updateTicket({ status: e.target.value })}>
+              {TICKET_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select style={{ ...S.input, width: "auto" }} value={selected.priority} onChange={(e) => updateTicket({ priority: e.target.value })}>
+              {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          {selected.description && <p style={{ fontSize: 13.5, color: "#374151", lineHeight: 1.6, whiteSpace: "pre-wrap", margin: "0 0 8px" }}>{selected.description}</p>}
+          <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "0 0 18px" }}>Raised by {selected.created_by || "—"} · {new Date(selected.created_at).toLocaleString()}</p>
+
+          <h4 style={{ fontSize: 13, color: "#14161C", margin: "0 0 10px" }}>Replies</h4>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12 }}>
+            {comments.length === 0 && <p style={{ fontSize: 12.5, color: "#9AA1AE", margin: 0 }}>No replies yet.</p>}
+            {comments.map((c) => (
+              <div key={c.id} style={{ background: "#F5F6F8", border: "1px solid #E6E8EC", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontSize: 13.5, color: "#374151", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{c.body}</div>
+                <div style={{ fontSize: 11, color: "#9AA1AE", marginTop: 6 }}>{c.author || "—"} · {new Date(c.created_at).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+          <textarea style={{ ...S.input, minHeight: 70, resize: "vertical", fontFamily: "inherit" }} value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Write a reply…" />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 }}>
+            <button style={{ ...S.secondaryBtn, padding: "8px 14px", color: "#D6414C" }} onClick={() => deleteTicket(selected)}>Delete</button>
+            <button style={{ ...S.primaryBtn, opacity: sending || !reply.trim() ? 0.6 : 1 }} onClick={addReply} disabled={sending || !reply.trim()}>{sending ? "Sending…" : "Reply"}</button>
+          </div>
+        </Drawer>
+      )}
+    </div>
+  );
+}
+
 function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
   const [saTab, setSaTab] = useState("overview");
   const [selectedBranch, setSelectedBranch] = useState(null);
@@ -3288,6 +3467,8 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
         <SuperAdminSidebar saTab={saTab} setSaTab={(t) => { setSaTab(t); setSelectedBranch(null); }} />
         <main style={S.main}>
           {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} branchAdmins={branchAdmins} loading={loading} />}
+
+          {saTab === "tickets" && <TicketsPage email={email} />}
 
           {saTab === "branches" && selectedBranch && (
             <BranchDetail branch={selectedBranch} usedCount={deviceCounts[selectedBranch.id] || 0} onBack={() => setSelectedBranch(null)} />
