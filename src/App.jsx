@@ -2204,8 +2204,9 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "18px 16px 16px", borderBottom: "1px solid #E6E8EC" }}>
             <div>
               <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: 0 }}>Recordings library</h3>
-              <p style={{ fontSize: 12.5, color: "#6B7280", margin: "4px 0 0", maxWidth: 520 }}>
+              <p style={{ fontSize: 12.5, color: "#6B7280", margin: "4px 0 0", maxWidth: 540 }}>
                 Keep up to {MAX_RECORDINGS} recordings here. Pick one above when sending a call — it plays when the customer answers.
+                <br /><span style={{ color: "#9AA1AE" }}>Format: MP3, M4A, WAV or OGG — MP3 works best. Up to ~10&nbsp;MB each.</span>
               </p>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -2216,7 +2217,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
                 opacity: recordings.length >= MAX_RECORDINGS || recUploading ? 0.5 : 1,
               }}>
                 <Upload size={14} /> {recUploading ? "Uploading…" : "Upload recording"}
-                <input ref={recInputRef} type="file" accept="audio/*" style={{ display: "none" }}
+                <input ref={recInputRef} type="file" accept=".mp3,.m4a,.wav,.ogg,.aac,audio/*" style={{ display: "none" }}
                   disabled={recordings.length >= MAX_RECORDINGS || recUploading}
                   onChange={(e) => uploadRecording(e.target.files?.[0] || null)} />
               </label>
