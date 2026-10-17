@@ -1953,7 +1953,12 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
   const [callImei, setCallImei] = useState(initialImei || "");
   const [callCaller, setCallCaller] = useState("");
   const [callText, setCallText] = useState("");
-  const [callAudioFile, setCallAudioFile] = useState(null);
+  const [selectedRecordingUrl, setSelectedRecordingUrl] = useState("");
+  const [recordings, setRecordings] = useState([]);
+  const [recordingsLoading, setRecordingsLoading] = useState(true);
+  const [recUploading, setRecUploading] = useState(false);
+  const [recErr, setRecErr] = useState("");
+  const recInputRef = useRef(null);
   const [deviceOptions, setDeviceOptions] = useState([]);
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState(null); // { ok: bool, text: string }
@@ -1991,7 +1996,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
   async function submitCall() {
     setResult(null);
     if (!callImei.trim()) { setResult({ ok: false, text: "Enter the device IMEI." }); return; }
-    if (!callText.trim() && !callAudioFile) { setResult({ ok: false, text: "Write a message or upload an audio file." }); return; }
+    if (!callText.trim() && !selectedRecordingUrl) { setResult({ ok: false, text: "Write a message or pick a recording." }); return; }
 
     setSending(true);
     const { data: device, error: lookupErr } = await supabase
@@ -2005,19 +2010,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
       return;
     }
 
-    let audioUrl = null;
-    if (callAudioFile) {
-      const ext = (callAudioFile.name.split(".").pop() || "amr").toLowerCase();
-      const path = `call-${device.id}-${Date.now()}.${ext}`;
-      const { error: upErr } = await supabase.storage.from("call-audio").upload(path, callAudioFile, { upsert: true });
-      if (upErr) {
-        setSending(false);
-        setResult({ ok: false, text: upErr.message });
-        return;
-      }
-      const { data: pub } = supabase.storage.from("call-audio").getPublicUrl(path);
-      audioUrl = pub.publicUrl;
-    }
+    const audioUrl = selectedRecordingUrl || null;
 
     const { data: { user } } = await supabase.auth.getUser();
     await supabase.from("device_commands").insert({
@@ -2033,7 +2026,48 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
     setResult({ ok: true, text: "Call sent — the phone will pick it up within a couple of seconds." });
     setCallCaller("");
     setCallText("");
-    setCallAudioFile(null);
+    setSelectedRecordingUrl("");
+  }
+
+  const RECORDINGS_PREFIX = "recordings";
+  const MAX_RECORDINGS = 5;
+
+  async function loadRecordings() {
+    setRecordingsLoading(true);
+    const { data, error } = await supabase.storage.from("call-audio")
+      .list(RECORDINGS_PREFIX, { limit: 100, sortBy: { column: "created_at", order: "desc" } });
+    if (error) { setRecErr(error.message); setRecordingsLoading(false); return; }
+    const items = (data || []).filter((f) => f.id).map((f) => ({
+      name: f.name,
+      path: `${RECORDINGS_PREFIX}/${f.name}`,
+      url: supabase.storage.from("call-audio").getPublicUrl(`${RECORDINGS_PREFIX}/${f.name}`).data.publicUrl,
+    }));
+    setRecordings(items);
+    setRecordingsLoading(false);
+  }
+  useEffect(() => { loadRecordings(); }, []);
+
+  async function uploadRecording(file) {
+    if (!file) return;
+    setRecErr("");
+    if (recordings.length >= MAX_RECORDINGS) { setRecErr(`You can keep up to ${MAX_RECORDINGS} recordings — delete one first.`); return; }
+    const clean = (file.name.replace(/[^\w.\- ]+/g, "").trim()) || `recording-${Date.now()}.mp3`;
+    setRecUploading(true);
+    const { error } = await supabase.storage.from("call-audio")
+      .upload(`${RECORDINGS_PREFIX}/${clean}`, file, { upsert: true, contentType: file.type || "audio/mpeg" });
+    setRecUploading(false);
+    if (recInputRef.current) recInputRef.current.value = "";
+    if (error) { setRecErr(error.message); return; }
+    loadRecordings();
+  }
+
+  async function deleteRecording(rec) {
+    setRecErr("");
+    const { data, error } = await supabase.storage.from("call-audio").remove([rec.path]);
+    if (error) { setRecErr(`Couldn't delete: ${error.message}`); return; }
+    if (!data || data.length === 0) { setRecErr("Couldn't delete — storage delete permission is missing."); return; }
+    if (selectedRecordingUrl === rec.url) setSelectedRecordingUrl("");
+    loadRecordings();
   }
 
   const tabs = [
@@ -2045,7 +2079,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
   const tabCopy = {
     popups: { title: "Pop-ups", desc: "The pop-up window will appear in the phone. You can set Title and content." },
     push: { title: "Push", desc: "Sending off notification messages." },
-    call: { title: "Simulated Push Call", desc: "Shows a simulated incoming call on the phone by IMEI. If you upload an audio file it plays on accept; otherwise your written message is read out loud." },
+    call: { title: "Simulated Push Call", desc: "Shows a simulated incoming call on the phone by IMEI. Pick a recording to play when the customer answers, or leave it to read your written message aloud." },
   };
 
   return (
@@ -2133,20 +2167,16 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
                     placeholder="e.g. This is a reminder from Karachi Electronics. Your installment payment is overdue."
                   />
                 </Field>
-                <Field label="Or upload a recording">
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <label style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                      <Upload size={14} /> {callAudioFile ? "Change recording" : "Choose recording"}
-                      <input
-                        type="file"
-                        accept="audio/*"
-                        style={{ display: "none" }}
-                        onChange={(e) => setCallAudioFile(e.target.files?.[0] || null)}
-                      />
-                    </label>
-                    {callAudioFile && <span style={{ fontSize: 12.5, color: "#374151" }}>{callAudioFile.name}</span>}
-                  </div>
-                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>When the customer answers, this recording plays like the caller is speaking. If both are filled, the recording plays instead of the written message.</p>
+                <Field label="Or play a recording">
+                  {recordings.length === 0 ? (
+                    <p style={{ fontSize: 12.5, color: "#9AA1AE", margin: 0 }}>No recordings yet — add one in the Recordings library below.</p>
+                  ) : (
+                    <select style={S.input} value={selectedRecordingUrl} onChange={(e) => setSelectedRecordingUrl(e.target.value)}>
+                      <option value="">None — read the message aloud</option>
+                      {recordings.map((r) => <option key={r.path} value={r.url}>{r.name}</option>)}
+                    </select>
+                  )}
+                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>When the customer answers, the chosen recording plays like the caller is speaking. If none is picked, the written message is read aloud.</p>
                 </Field>
               </>
             )}
@@ -2168,6 +2198,49 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
 
         <PhonePreview variant={activeTab} title={title} content={content} number={callImei} />
       </div>
+
+      {activeTab === "call" && (
+        <div style={{ ...S.tableCard, marginTop: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+            <div>
+              <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: 0 }}>Recordings library</h3>
+              <p style={{ fontSize: 12.5, color: "#6B7280", margin: "4px 0 0", maxWidth: 520 }}>
+                Keep up to {MAX_RECORDINGS} recordings here. Pick one above when sending a call — it plays when the customer answers.
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 12, color: "#9AA1AE" }}>{recordings.length} / {MAX_RECORDINGS}</span>
+              <label style={{
+                ...S.primaryBtn, display: "inline-flex", alignItems: "center", gap: 6,
+                cursor: recordings.length >= MAX_RECORDINGS || recUploading ? "not-allowed" : "pointer",
+                opacity: recordings.length >= MAX_RECORDINGS || recUploading ? 0.5 : 1,
+              }}>
+                <Upload size={14} /> {recUploading ? "Uploading…" : "Upload recording"}
+                <input ref={recInputRef} type="file" accept="audio/*" style={{ display: "none" }}
+                  disabled={recordings.length >= MAX_RECORDINGS || recUploading}
+                  onChange={(e) => uploadRecording(e.target.files?.[0] || null)} />
+              </label>
+            </div>
+          </div>
+          {recErr && <p style={{ fontSize: 12.5, color: "#D6414C", margin: "0 0 10px" }}>{recErr}</p>}
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>{["Name", "Preview", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <tbody>
+              {recordingsLoading && <tr><td colSpan={3} style={S.emptyCell}>Loading…</td></tr>}
+              {!recordingsLoading && recordings.length === 0 && <tr><td colSpan={3} style={S.emptyCell}>No recordings yet — upload one to get started.</td></tr>}
+              {recordings.map((r) => (
+                <tr key={r.path} style={S.tr}>
+                  <td style={S.td}>{r.name}</td>
+                  <td style={S.td}><audio controls preload="none" src={r.url} style={{ height: 32, maxWidth: 240 }} /></td>
+                  <td style={{ ...S.td, textAlign: "right" }}>
+                    <button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5, color: "#D6414C" }} onClick={() => deleteRecording(r)}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
