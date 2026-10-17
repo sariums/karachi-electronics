@@ -1951,6 +1951,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [callImei, setCallImei] = useState(initialImei || "");
+  const [callCaller, setCallCaller] = useState("");
   const [callText, setCallText] = useState("");
   const [callAudioFile, setCallAudioFile] = useState(null);
   const [deviceOptions, setDeviceOptions] = useState([]);
@@ -2022,6 +2023,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
     await supabase.from("device_commands").insert({
       device_id: device.id,
       command: "PUSH_CALL",
+      caller_number: callCaller.trim() || null,
       message: callText.trim() || null,
       audio_url: audioUrl,
       issued_by: user?.email || "admin",
@@ -2029,6 +2031,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
     await supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
     setSending(false);
     setResult({ ok: true, text: "Call sent — the phone will pick it up within a couple of seconds." });
+    setCallCaller("");
     setCallText("");
     setCallAudioFile(null);
   }
@@ -2118,6 +2121,10 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
                 <Field label="Device IMEI">
                   <input style={S.input} className="mono" value={callImei} onChange={(e) => setCallImei(e.target.value)} placeholder="Enter the device's IMEI" />
                 </Field>
+                <Field label="Caller name or number">
+                  <input style={S.input} value={callCaller} onChange={(e) => setCallCaller(e.target.value)} placeholder="e.g. Karachi Electronics  or  0300-1112233" />
+                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>Shown on the phone's incoming-call screen. Leave empty to show “Unknown”.</p>
+                </Field>
                 <Field label="Message to speak">
                   <textarea
                     style={{ ...S.input, minHeight: 90, resize: "vertical", fontFamily: "inherit" }}
@@ -2126,10 +2133,10 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
                     placeholder="e.g. This is a reminder from Karachi Electronics. Your installment payment is overdue."
                   />
                 </Field>
-                <Field label="Or upload audio">
+                <Field label="Or upload a recording">
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <label style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                      <Upload size={14} /> {callAudioFile ? "Change file" : "Choose file"}
+                      <Upload size={14} /> {callAudioFile ? "Change recording" : "Choose recording"}
                       <input
                         type="file"
                         accept="audio/*"
@@ -2139,7 +2146,7 @@ function SendMessagePage({ initialDeviceId, initialTab, initialImei }) {
                     </label>
                     {callAudioFile && <span style={{ fontSize: 12.5, color: "#374151" }}>{callAudioFile.name}</span>}
                   </div>
-                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>If both are filled, the audio plays instead of the spoken message.</p>
+                  <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>When the customer answers, this recording plays like the caller is speaking. If both are filled, the recording plays instead of the written message.</p>
                 </Field>
               </>
             )}
