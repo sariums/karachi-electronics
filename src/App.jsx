@@ -637,9 +637,23 @@ function Devices({ onSendMessage }) {
   useEffect(() => {
     const channel = supabase
       .channel("device_events_feed")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "device_events" }, () => load())
+      // New activity-feed events (lock/unlock/push acks, etc.)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "device_events" }, () => refresh())
+      // Direct status changes on the device row — e.g. a phone unlocked offline
+      // with the mobile code flips is_locked without inserting a device_event.
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "devices" }, () => refresh())
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Fallback: silently re-sync the list every few seconds so status stays
+  // current even if a realtime update is missed (e.g. table not in the
+  // realtime publication). Pauses while the tab is hidden.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, 12000);
+    return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -652,12 +666,18 @@ function Devices({ onSendMessage }) {
 
   async function load() {
     setLoading(true);
+    await refresh();
+    setLoading(false);
+  }
+
+  // Silent re-fetch — no loading spinner, so realtime/polling updates don't
+  // flicker the page or feel like a manual refresh.
+  async function refresh() {
     const { data } = await supabase
       .from("devices")
       .select("*, device_commands(command, issued_at, acknowledged_at)")
       .order("provisioned_at", { ascending: false });
-    setDevices(data || []);
-    setLoading(false);
+    if (data) setDevices(data);
   }
 
   async function addDevice() {
