@@ -3,7 +3,7 @@ import {
   Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download,
+  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download, CheckCircle,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
@@ -2253,98 +2253,41 @@ function SettingsCard({ title, description, toggle, checked, onToggle, children 
 function AppVersionCard() {
   const [current, setCurrent] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [versionCode, setVersionCode] = useState("");
-  const [versionName, setVersionName] = useState("");
-  const [apkFile, setApkFile] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState(null); // { ok, text }
-  const fileInputRef = useRef(null);
 
   async function loadCurrent() {
     const { data } = await supabase.from("app_version").select("*").eq("id", 1).maybeSingle();
     setCurrent(data || null);
-    if (data) {
-      setVersionCode(String(data.version_code));
-      setVersionName(data.version_name || "");
-    }
     setLoading(false);
   }
   useEffect(() => { loadCurrent(); }, []);
 
-  async function save() {
-    setMsg(null);
-    const code = Number(versionCode);
-    if (!versionCode.trim() || !Number.isInteger(code) || code <= 0) {
-      setMsg({ ok: false, text: "Enter the version code as a whole number (it must match the APK's versionCode)." });
-      return;
-    }
-    if (!apkFile && !current?.apk_url) {
-      setMsg({ ok: false, text: "Choose the signed release APK to upload." });
-      return;
-    }
-    setSaving(true);
-    let apkUrl = current?.apk_url;
-    if (apkFile) {
-      const path = `karachi-electronics-lockapp-v${code}.apk`;
-      const { error: upErr } = await supabase.storage.from("releases").upload(path, apkFile, {
-        upsert: false,
-        contentType: "application/vnd.android.package-archive",
-      });
-      if (upErr) {
-        setSaving(false);
-        setMsg({
-          ok: false,
-          text: /already exists|duplicate/i.test(upErr.message)
-            ? `An APK for version code ${code} is already uploaded. Use a new version code — re-using a filename can serve a stale file.`
-            : upErr.message,
-        });
-        return;
-      }
-      apkUrl = supabase.storage.from("releases").getPublicUrl(path).data.publicUrl;
-    }
-    const { error } = await supabase.from("app_version").upsert({
-      id: 1,
-      version_code: code,
-      version_name: versionName.trim() || null,
-      apk_url: apkUrl,
-      updated_at: new Date().toISOString(),
-    });
-    setSaving(false);
-    if (error) { setMsg({ ok: false, text: error.message }); return; }
-    setMsg({ ok: true, text: "Saved — phones will update on their next check-in." });
-    setApkFile(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-    loadCurrent();
-  }
-
   return (
-    <SettingsCard title="App version" description="Phones update the lock app by themselves when the version code below is higher than the one they run. Applies to every branch.">
-      <div style={{ background: "#F5F6F8", border: "1px solid #E6E8EC", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#6B7280" }}>
-        {loading ? "Loading…" : current
-          ? <>Live version: <strong style={{ color: "#14161C" }}>{current.version_name ? `${current.version_name} ` : ""}(code {current.version_code})</strong></>
-          : "No version published yet."}
+    <SettingsCard title="App version" description="Phones update the lock app to the version shown here by themselves — no reinstalling, no USB. New versions are built and published by the developer; this panel just shows what's live.">
+      <div style={{ background: "#F5F6F8", border: "1px solid #E6E8EC", borderRadius: 10, padding: "16px 18px" }}>
+        {loading ? (
+          <span style={{ fontSize: 13, color: "#6B7280" }}>Loading…</span>
+        ) : current ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 44, height: 44, borderRadius: 10, background: "#ECFDF5", color: "#0E9488", flexShrink: 0 }}>
+              <CheckCircle size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11.5, letterSpacing: 0.3, textTransform: "uppercase", color: "#9AA1AE", marginBottom: 2 }}>Live version</div>
+              <div style={{ fontSize: 17, fontWeight: 600, color: "#14161C" }}>
+                {current.version_name ? `${current.version_name} ` : ""}<span className="mono" style={{ fontSize: 14, color: "#6B7280", fontWeight: 500 }}>(code {current.version_code})</span>
+              </div>
+              {current.updated_at && (
+                <div style={{ fontSize: 11.5, color: "#9AA1AE", marginTop: 2 }}>Published {new Date(current.updated_at).toLocaleString()}</div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <span style={{ fontSize: 13, color: "#6B7280" }}>No version published yet.</span>
+        )}
       </div>
-      <Field label="Version code">
-        <input style={S.input} className="mono" inputMode="numeric" value={versionCode} onChange={(e) => setVersionCode(e.target.value)} placeholder="e.g. 2" />
-        <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>Must exactly match the versionCode baked into the APK. Phones only update when this is higher than what they run.</p>
-      </Field>
-      <Field label="Version name (optional)">
-        <input style={S.input} value={versionName} onChange={(e) => setVersionName(e.target.value)} placeholder="e.g. 1.1" />
-      </Field>
-      <Field label="APK file">
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <input ref={fileInputRef} type="file" accept=".apk,application/vnd.android.package-archive" style={{ display: "none" }} onChange={(e) => setApkFile(e.target.files?.[0] || null)} />
-          <button type="button" style={{ ...S.secondaryBtn, display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => fileInputRef.current?.click()}>
-            <Upload size={14} /> {apkFile ? "Change file" : "Choose APK"}
-          </button>
-          {apkFile && <span style={{ fontSize: 12.5, color: "#374151" }}>{apkFile.name} ({(apkFile.size / 1024 / 1024).toFixed(1)} MB)</span>}
-        </div>
-        <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "6px 0 0" }}>Uploaded under a new filename (karachi-electronics-lockapp-v&lt;code&gt;.apk) each time. Leave empty to only change the name.</p>
-      </Field>
-      <button style={{ ...S.primaryBtn, opacity: saving ? 0.7 : 1 }} onClick={save} disabled={saving || loading}>
-        {saving ? "Uploading & saving…" : "Save"}
-      </button>
-      {msg && <p style={{ fontSize: 12.5, color: msg.ok ? "#0E9488" : "#D6414C", margin: "10px 0 0" }}>{msg.text}</p>}
+      <p style={{ fontSize: 11.5, color: "#9AA1AE", margin: "10px 0 0" }}>
+        Every phone checks in and updates itself to this version automatically. To roll out a new version, ask the developer to publish it — then all phones update on their own.
+      </p>
     </SettingsCard>
   );
 }
