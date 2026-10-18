@@ -2787,8 +2787,66 @@ function GeneralSettingsPage() {
         <SettingsCard title="Message of activation" description="Display a notification message when the lock is activated." toggle checked={t.activation} onToggle={setOne("activation")} />
 
         <button style={{ ...S.primaryBtn, marginTop: 8 }}>Submit</button>
+
+        <LegalPagesEditor />
       </div>
     </div>
+  );
+}
+
+function LegalPagesEditor() {
+  const [privacy, setPrivacy] = useState("");
+  const [terms, setTerms] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    supabase.from("app_pages").select("page_key, content").in("page_key", ["privacy_policy", "terms"])
+      .then(({ data }) => {
+        const m = Object.fromEntries((data || []).map((r) => [r.page_key, r.content || ""]));
+        setPrivacy(m.privacy_policy || "");
+        setTerms(m.terms || "");
+        setLoading(false);
+      });
+  }, []);
+
+  async function save() {
+    setSaving(true); setMsg("");
+    const { data: { user } } = await supabase.auth.getUser();
+    const now = new Date().toISOString();
+    const { error } = await supabase.from("app_pages").upsert([
+      { page_key: "privacy_policy", title: "Privacy Policy", content: privacy, updated_at: now, updated_by: user?.email || "admin" },
+      { page_key: "terms", title: "Terms & Conditions", content: terms, updated_at: now, updated_by: user?.email || "admin" },
+    ], { onConflict: "page_key" });
+    setSaving(false);
+    setMsg(error ? error.message : "Saved — the phones will show this.");
+  }
+
+  const docStyle = { ...S.input, minHeight: 200, resize: "vertical", fontFamily: "inherit", lineHeight: 1.6, fontSize: 14 };
+
+  return (
+    <SettingsCard
+      title="Privacy Policy & Terms"
+      description="This text is shown on the locked phone's menu (Privacy Policy and Terms & Conditions). Write it like a document — it appears on the phone exactly as typed."
+    >
+      {loading ? (
+        <p style={{ color: "#9AA1AE" }}>Loading…</p>
+      ) : (
+        <>
+          <Field label="Privacy Policy">
+            <textarea style={docStyle} value={privacy} onChange={(e) => setPrivacy(e.target.value)} placeholder="Write your Privacy Policy here…" />
+          </Field>
+          <Field label="Terms & Conditions">
+            <textarea style={docStyle} value={terms} onChange={(e) => setTerms(e.target.value)} placeholder="Write your Terms & Conditions here…" />
+          </Field>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
+            <button style={S.primaryBtn} onClick={save} disabled={saving}>{saving ? "Saving…" : "Save pages"}</button>
+            {msg && <span style={{ fontSize: 13, color: "#1F7A4D" }}>{msg}</span>}
+          </div>
+        </>
+      )}
+    </SettingsCard>
   );
 }
 
@@ -3322,6 +3380,11 @@ function FeedbacksPage() {
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                 <div>
                   <div style={{ fontSize: 15, fontWeight: 600, color: "#14161C" }}>{f.title || "(no subject)"}</div>
+                  {(f.name || f.phone || f.email) && (
+                    <div style={{ fontSize: 13, color: "#374151", marginTop: 3 }}>
+                      {[f.name, f.phone, f.email].filter(Boolean).join("  ·  ")}
+                    </div>
+                  )}
                   <div style={{ fontSize: 12, color: "#9AA1AE", marginTop: 3 }}>
                     From IMEI <b style={{ color: "#4B5563" }}>{f.imei || "—"}</b> · {new Date(f.created_at).toLocaleString()}
                   </div>
