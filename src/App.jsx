@@ -1761,6 +1761,12 @@ function InstallationPage() {
       "android.app.extra.PROVISIONING_SKIP_ENCRYPTION": true,
       "android.app.extra.PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED": true,
     };
+    // Per-branch auto-enroll: the bootstrap reads this branch_id during provisioning
+    // and forwards it to the lock app, which self-enrolls the phone into this branch
+    // on its first poll (no manual IMEI entry). Every branch's QR carries its own id.
+    if (branchId) {
+      payload["android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE"] = { branch_id: branchId };
+    }
     if (wifiSsid.trim()) {
       payload["android.app.extra.PROVISIONING_WIFI_SSID"] = wifiSsid.trim();
       payload["android.app.extra.PROVISIONING_WIFI_SECURITY_TYPE"] = wifiPassword ? "WPA" : "NONE";
@@ -1771,7 +1777,7 @@ function InstallationPage() {
       .then((url) => { if (!cancelled) setQrDataUrl(url); })
       .catch(() => { if (!cancelled) setQrDataUrl(""); });
     return () => { cancelled = true; };
-  }, [packageName, adminReceiver, checksum, apkUrl, wifiSsid, wifiPassword]);
+  }, [packageName, adminReceiver, checksum, apkUrl, wifiSsid, wifiPassword, branchId]);
 
   async function save() {
     setSaving(true);

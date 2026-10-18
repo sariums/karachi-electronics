@@ -55,6 +55,11 @@ Deno.serve(async (req) => {
       .update({ is_locked: false })
       .eq("id", device.id);
 
+    // Logging this PIN_CODE unlock also rotates the device's unlock code: a database
+    // trigger (see supabase/rotate_pin_on_unlock.sql) regenerates devices.unlock_pin
+    // whenever a PIN_CODE UNLOCK event is inserted, so a used code is single-use and
+    // can't unlock the phone again next time. Kept in SQL (not here) so it applies even
+    // if this function is ever bypassed, and needs no function redeploy.
     await supabase
       .from("device_events")
       .insert({ device_id: device.id, event_type: "UNLOCK", method: "PIN_CODE" });
