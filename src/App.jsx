@@ -850,7 +850,11 @@ function Devices({ onSendMessage }) {
     await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
   }
 
-  function endAudioCall() {
+  function endAudioCall(sendBye = false) {
+    // Tell the phone we hung up so its call screen closes too (not just this end).
+    if (sendBye && channelRef.current) {
+      try { channelRef.current.send({ type: "broadcast", event: "bye", payload: {} }); } catch (e) {}
+    }
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t) => t.stop()); localStreamRef.current = null; }
     if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
@@ -923,6 +927,10 @@ function Devices({ onSendMessage }) {
         try {
           await pc.addIceCandidate({ sdpMid: payload.sdpMid, sdpMLineIndex: payload.sdpMLineIndex, candidate: payload.candidate });
         } catch (e) {}
+      })
+      .on("broadcast", { event: "bye" }, () => {
+        // The phone hung up (declined, ended, or auto-declined) — close this end too.
+        endAudioCall(false);
       })
       .subscribe();
 
@@ -1113,7 +1121,7 @@ function Devices({ onSendMessage }) {
               {audioCall.status === "connected" && "Connected — live call in progress."}
               {audioCall.status === "failed" && (audioCall.errorMsg || "Call failed.")}
             </p>
-            <button style={S.dangerBtn} onClick={endAudioCall}>
+            <button style={S.dangerBtn} onClick={() => endAudioCall(true)}>
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><PhoneOff size={14} /> End call</span>
             </button>
           </div>
