@@ -3270,6 +3270,7 @@ function FeedbacksPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("all");
+  const [confirmDel, setConfirmDel] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -3285,9 +3286,9 @@ function FeedbacksPage() {
     await supabase.from("device_feedback").update({ status }).eq("id", id);
     load();
   }
-  async function remove(id) {
-    if (!window.confirm("Delete this feedback?")) return;
-    await supabase.from("device_feedback").delete().eq("id", id);
+  async function doDelete(f) {
+    await supabase.from("device_feedback").delete().eq("id", f.id);
+    setConfirmDel(null);
     load();
   }
 
@@ -3342,11 +3343,20 @@ function FeedbacksPage() {
               <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
                 {f.status !== "read" && <button style={S.secondaryBtn} onClick={() => setStatus(f.id, "read")}>Mark read</button>}
                 {f.status !== "resolved" && <button style={S.secondaryBtn} onClick={() => setStatus(f.id, "resolved")}>Resolve</button>}
-                <button style={{ ...S.secondaryBtn, color: "#B4232A", borderColor: "#F0C9CB" }} onClick={() => remove(f.id)}>Delete</button>
+                <button style={{ ...S.secondaryBtn, color: "#B4232A", borderColor: "#F0C9CB" }} onClick={() => setConfirmDel(f)}>Delete</button>
               </div>
             </div>
           ))}
         </div>
+      )}
+
+      {confirmDel && (
+        <ConfirmDialog
+          title="Delete feedback"
+          message={`This feedback from IMEI ${confirmDel.imei || "—"} will be permanently removed. This can't be undone.`}
+          onConfirm={() => doDelete(confirmDel)}
+          onCancel={() => setConfirmDel(null)}
+        />
       )}
     </div>
   );
