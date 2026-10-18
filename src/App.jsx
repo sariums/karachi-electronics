@@ -2798,7 +2798,9 @@ function GeneralSettingsPage() {
 
         <button style={{ ...S.primaryBtn, marginTop: 8 }}>Submit</button>
 
-        <LegalPagesEditor />
+        <div style={{ marginTop: 36, paddingTop: 28, borderTop: "1px solid #E6E8EC" }}>
+          <LegalPagesEditor />
+        </div>
       </div>
     </div>
   );
