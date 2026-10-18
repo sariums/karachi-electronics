@@ -3,7 +3,7 @@ import {
   Smartphone, Wallet, LayoutDashboard, LogOut, Mail, Lock,
   Plus, X, Pencil, Trash2, Lock as LockIcon, Unlock, Bell,
   History, KeyRound, RefreshCw, LayoutGrid, PhoneCall, Mic, PhoneOff, UserCog, ShieldCheck,
-  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download, CheckCircle, Ticket,
+  ChevronDown, Settings, HelpCircle, Sliders, Send, Upload, Copy, PhoneIncoming, QrCode, Wifi, Download, CheckCircle, Ticket, MessageSquare,
 } from "lucide-react";
 import QRCode from "qrcode";
 import { supabase } from "./supabaseClient";
@@ -163,6 +163,7 @@ export default function App() {
               )}
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
               {tab === "installation" && <InstallationPage />}
+              {tab === "feedbacks" && <FeedbacksPage />}
               {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} initialImei={sendMessageImei} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
               {tab === "roles" && <RolesList />}
@@ -316,6 +317,7 @@ function Sidebar({ tab, setTab }) {
         { id: "devices", label: "Devices", icon: Smartphone },
         { id: "deviceSettings", label: "Device Settings", icon: Settings },
         { id: "installation", label: "Installation", icon: QrCode },
+        { id: "feedbacks", label: "Feedbacks", icon: MessageSquare },
       ],
     },
     {
@@ -3263,6 +3265,93 @@ function TicketImages({ images }) {
 /** Ticket board. Super admin sees every branch's tickets and manages status; a branch
  * admin sees and raises only their own branch's tickets. Both can attach images
  * (upload or paste) and reply. Backed by the `tickets` + `ticket_comments` tables. */
+function FeedbacksPage() {
+  const { branchId } = useContext(BranchContext);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  async function load() {
+    setLoading(true);
+    let q = supabase.from("device_feedback").select("*").order("created_at", { ascending: false });
+    if (branchId) q = q.eq("branch_id", branchId);
+    const { data } = await q;
+    setRows(data || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, [branchId]);
+
+  async function setStatus(id, status) {
+    await supabase.from("device_feedback").update({ status }).eq("id", id);
+    load();
+  }
+  async function remove(id) {
+    if (!window.confirm("Delete this feedback?")) return;
+    await supabase.from("device_feedback").delete().eq("id", id);
+    load();
+  }
+
+  const statusStyle = (s) =>
+    s === "new" ? { background: "#FBF1E1", color: "#8A5A10" }
+    : s === "resolved" ? { background: "#E4F5EC", color: "#1F7A4D" }
+    : { background: "#EEF0F4", color: "#4B5563" };
+
+  const filtered = rows.filter((r) => statusFilter === "all" || r.status === statusFilter);
+
+  return (
+    <div>
+      <PageHeader eyebrow="Device Management" title="Feedbacks" count={rows.length}>
+        <select style={S.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+          <option value="all">All</option>
+          <option value="new">New</option>
+          <option value="read">Read</option>
+          <option value="resolved">Resolved</option>
+        </select>
+        <button style={S.secondaryBtn} onClick={load}>Refresh</button>
+      </PageHeader>
+
+      {loading ? (
+        <p style={{ color: "#9AA1AE" }}>Loading…</p>
+      ) : filtered.length === 0 ? (
+        <div style={S.tableCard}><p style={S.emptyCell}>No feedback from devices yet.</p></div>
+      ) : (
+        <div style={{ display: "grid", gap: 14 }}>
+          {filtered.map((f) => (
+            <div key={f.id} style={S.statCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: "#14161C" }}>{f.title || "(no subject)"}</div>
+                  <div style={{ fontSize: 12, color: "#9AA1AE", marginTop: 3 }}>
+                    From IMEI <b style={{ color: "#4B5563" }}>{f.imei || "—"}</b> · {new Date(f.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <span style={{ ...S.badge, ...statusStyle(f.status) }}>{f.status}</span>
+              </div>
+              {f.description && (
+                <p style={{ fontSize: 13.5, color: "#374151", margin: "10px 0 0", whiteSpace: "pre-wrap" }}>{f.description}</p>
+              )}
+              {f.images?.length > 0 && (
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  {f.images.map((u, i) => (
+                    <a key={i} href={u} target="_blank" rel="noreferrer">
+                      <img src={u} alt="" style={{ width: 76, height: 76, objectFit: "cover", borderRadius: 8, border: "1px solid #E6E8EC" }} />
+                    </a>
+                  ))}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+                {f.status !== "read" && <button style={S.secondaryBtn} onClick={() => setStatus(f.id, "read")}>Mark read</button>}
+                {f.status !== "resolved" && <button style={S.secondaryBtn} onClick={() => setStatus(f.id, "resolved")}>Resolve</button>}
+                <button style={{ ...S.secondaryBtn, color: "#B4232A", borderColor: "#F0C9CB" }} onClick={() => remove(f.id)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TicketsPage({ email, isSuperAdmin = false, branchId = null, branches = [] }) {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
