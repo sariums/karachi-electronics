@@ -850,10 +850,12 @@ function Devices({ onSendMessage }) {
     await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
   }
 
-  function endAudioCall(sendBye = false) {
-    // Tell the phone we hung up so its call screen closes too (not just this end).
+  async function endAudioCall(sendBye = false) {
+    // Tell the phone we hung up so its call screen closes too. Await the send so it
+    // actually flushes over the websocket before we tear the channel down below —
+    // removing the channel immediately would cancel the message in flight.
     if (sendBye && channelRef.current) {
-      try { channelRef.current.send({ type: "broadcast", event: "bye", payload: {} }); } catch (e) {}
+      try { await channelRef.current.send({ type: "broadcast", event: "bye", payload: {} }); } catch (e) {}
     }
     if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t) => t.stop()); localStreamRef.current = null; }
