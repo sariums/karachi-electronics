@@ -3089,6 +3089,7 @@ function SuperAdminSidebar({ saTab, setSaTab }) {
   const nav = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
     { id: "branches", label: "Branches", icon: Smartphone },
+    { id: "provisioningLogs", label: "Provisioning Logs", icon: History },
     { id: "tickets", label: "Tickets", icon: Ticket },
   ];
   return (
@@ -3439,7 +3440,7 @@ function FeedbacksPage() {
   );
 }
 
-function ProvisioningLogsPage() {
+function ProvisioningLogsPage({ allBranches = false }) {
   const { branchId } = useContext(BranchContext);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3448,7 +3449,7 @@ function ProvisioningLogsPage() {
 
   async function load() {
     let q = supabase.from("provisioning_logs").select("*").order("created_at", { ascending: false }).limit(4000);
-    if (branchId) q = q.eq("branch_id", branchId);
+    if (branchId && !allBranches) q = q.eq("branch_id", branchId);
     const { data } = await q;
     setRows(data || []);
     setLoading(false);
@@ -3852,6 +3853,8 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
         <SuperAdminSidebar saTab={saTab} setSaTab={(t) => { setSaTab(t); setSelectedBranch(null); }} />
         <main style={S.main}>
           {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} branchAdmins={branchAdmins} loading={loading} />}
+
+          {saTab === "provisioningLogs" && <ProvisioningLogsPage allBranches />}
 
           {saTab === "tickets" && <TicketsPage email={email} isSuperAdmin={true} branches={branches} />}
 
