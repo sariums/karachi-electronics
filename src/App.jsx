@@ -164,6 +164,7 @@ export default function App() {
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
               {tab === "installation" && <InstallationPage />}
               {tab === "feedbacks" && <FeedbacksPage />}
+              {tab === "provisioningLogs" && <ProvisioningLogsPage />}
               {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} initialImei={sendMessageImei} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
               {tab === "roles" && <RolesList />}
@@ -318,6 +319,7 @@ function Sidebar({ tab, setTab }) {
         { id: "deviceSettings", label: "Device Settings", icon: Settings },
         { id: "installation", label: "Installation", icon: QrCode },
         { id: "feedbacks", label: "Feedbacks", icon: MessageSquare },
+        { id: "provisioningLogs", label: "Provisioning Logs", icon: History },
       ],
     },
     {
@@ -3432,6 +3434,104 @@ function FeedbacksPage() {
           onConfirm={() => doDelete(confirmDel)}
           onCancel={() => setConfirmDel(null)}
         />
+      )}
+    </div>
+  );
+}
+
+function ProvisioningLogsPage() {
+  const { branchId } = useContext(BranchContext);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [auto, setAuto] = useState(true);
+  const [openId, setOpenId] = useState(null);
+
+  async function load() {
+    let q = supabase.from("provisioning_logs").select("*").order("created_at", { ascending: false }).limit(4000);
+    if (branchId) q = q.eq("branch_id", branchId);
+    const { data } = await q;
+    setRows(data || []);
+    setLoading(false);
+  }
+  useEffect(() => { setLoading(true); load(); }, [branchId]);
+  useEffect(() => {
+    if (!auto) return;
+    const t = setInterval(load, 8000);
+    return () => clearInterval(t);
+  }, [auto, branchId]);
+
+  // Group lines by install_id (one phone = one provisioning attempt).
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const r of rows) {
+      if (!m.has(r.install_id)) m.set(r.install_id, []);
+      m.get(r.install_id).push(r);
+    }
+    const arr = [...m.entries()].map(([install_id, lines]) => {
+      lines.sort((a, b) => (a.seq || 0) - (b.seq || 0));
+      const last = lines.reduce((mx, l) => (l.created_at > mx ? l.created_at : mx), lines[0].created_at);
+      const text = lines.map((l) => l.message).join("\n");
+      const done = /transferOwnership call returned|ownership transferred/i.test(text);
+      const errored = /THREW|failed|TIMED OUT|could not|Install did not succeed|not transferring/i.test(text);
+      return { install_id, lines, model: lines[0].model, branch_id: lines[0].branch_id, last, done, errored };
+    });
+    arr.sort((a, b) => (a.last < b.last ? 1 : -1));
+    return arr;
+  }, [rows]);
+
+  const isErrLine = (msg) => /THREW|failed|TIMED OUT|could not|did not succeed|not transferring/i.test(msg || "");
+  const statusChip = (g) =>
+    g.done ? { label: "completed", st: { background: "#E4F5EC", color: "#1F7A4D" } }
+    : g.errored ? { label: "error", st: { background: "#FBE9E9", color: "#B4232A" } }
+    : { label: "in progress", st: { background: "#FBF1E1", color: "#8A5A10" } };
+
+  return (
+    <div>
+      <PageHeader eyebrow="Device Management" title="Provisioning Logs" count={groups.length}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#4B5563" }}>
+          <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-refresh
+        </label>
+        <button style={S.secondaryBtn} onClick={load}>Refresh</button>
+      </PageHeader>
+
+      {loading ? (
+        <p style={{ color: "#9AA1AE" }}>Loading…</p>
+      ) : groups.length === 0 ? (
+        <div style={S.tableCard}><p style={S.emptyCell}>No provisioning logs yet. They appear live as a phone is set up.</p></div>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {groups.map((g) => {
+            const chip = statusChip(g);
+            const open = openId === g.install_id;
+            return (
+              <div key={g.install_id} style={S.statCard}>
+                <div
+                  style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", cursor: "pointer" }}
+                  onClick={() => setOpenId(open ? null : g.install_id)}
+                >
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "#14161C" }}>{g.model || "Unknown device"}</div>
+                    <div style={{ fontSize: 12, color: "#9AA1AE", marginTop: 3 }}>
+                      {new Date(g.last).toLocaleString()} · {g.lines.length} steps · id {g.install_id.slice(0, 8)}
+                    </div>
+                  </div>
+                  <span style={{ ...S.badge, ...chip.st }}>{chip.label}</span>
+                </div>
+                {open && (
+                  <pre style={{
+                    marginTop: 12, padding: 12, background: "#0F1115", borderRadius: 8, overflowX: "auto",
+                    fontSize: 12, lineHeight: 1.5, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    color: "#C7CBD1", whiteSpace: "pre-wrap", wordBreak: "break-word",
+                  }}>
+                    {g.lines.map((l) => (
+                      <div key={l.id} style={{ color: isErrLine(l.message) ? "#FF8A8A" : "#C7CBD1" }}>{l.message}</div>
+                    ))}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
