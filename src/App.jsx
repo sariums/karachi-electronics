@@ -608,6 +608,7 @@ function Devices({ onSendMessage }) {
   const { branchId, deviceLicenseLimit } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [latestVersionCode, setLatestVersionCode] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [sending, setSending] = useState(false);
@@ -673,6 +674,10 @@ function Devices({ onSendMessage }) {
   async function load() {
     setLoading(true);
     await refresh();
+    // The latest published app version, to flag devices still running an older one.
+    supabase.from("app_version").select("version_code").maybeSingle()
+      .then(({ data }) => setLatestVersionCode(data?.version_code ?? null))
+      .catch(() => {});
     setLoading(false);
   }
 
@@ -810,6 +815,17 @@ function Devices({ onSendMessage }) {
     supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
 
     load();
+  }
+
+  // Wakes the phone (FCM) so its next poll runs the self-update check and pulls the
+  // latest app_version. On budget ROMs where FCM may not arrive, it still updates on
+  // its next natural poll (locked/unlocked, app opened, or reboot).
+  function forceUpdate(device) {
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+    setCodeDialog({
+      code: "Update requested",
+      note: "The phone will fetch the latest version on its next check-in — right away if it's online, otherwise when it next polls, is locked/unlocked, or the app is opened.",
+    });
   }
 
   function showCode(device) {
@@ -1060,11 +1076,11 @@ function Devices({ onSendMessage }) {
 
       <div style={S.tableCard}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead><tr>{["Device", "Tag", "IMEI", "Status", "Last seen"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <thead><tr>{["Device", "Tag", "IMEI", "Status", "Version", "Last seen"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
-            {!loading && devices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices yet.</td></tr>}
-            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No devices match these filters.</td></tr>}
+            {loading && <tr><td colSpan={6} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && devices.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No devices yet.</td></tr>}
+            {!loading && devices.length > 0 && filteredDevices.length === 0 && <tr><td colSpan={6} style={S.emptyCell}>No devices match these filters.</td></tr>}
             {filteredDevices.map((d) => {
               const lastCmd = d.device_commands?.sort((a, b) => new Date(b.issued_at) - new Date(a.issued_at))[0];
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
@@ -1084,16 +1100,25 @@ function Devices({ onSendMessage }) {
                       )}
                       {pendingAck && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
                     </td>
+                    <td style={S.td} className="mono">
+                      {d.app_version_code
+                        ? <span style={{ color: (latestVersionCode && d.app_version_code < latestVersionCode) ? "#D6414C" : "#0E9488", fontWeight: 600 }}>
+                            {d.app_version_name ? `${d.app_version_name} (${d.app_version_code})` : d.app_version_code}
+                            {latestVersionCode && d.app_version_code < latestVersionCode ? " ↑" : ""}
+                          </span>
+                        : "—"}
+                    </td>
                     <td style={S.td} className="mono">{d.last_seen_at ? new Date(d.last_seen_at).toLocaleDateString() : "never"}</td>
                   </tr>
                   <tr style={S.tr}>
-                    <td colSpan={5} style={{ ...S.td, background: "#FAFBFC", padding: "10px 16px 14px" }}>
+                    <td colSpan={6} style={{ ...S.td, background: "#FAFBFC", padding: "10px 16px 14px" }}>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                         {d.is_locked ? (
                           <button style={actionBtn} onClick={() => sendCommand(d, "UNLOCK")}>Unlock</button>
                         ) : (
                           <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => sendCommand(d, "LOCK")}>Lock</button>
                         )}
+                        <button style={actionBtn} onClick={() => forceUpdate(d)}>Force Update</button>
                         <button style={actionBtn} onClick={() => onSendMessage(d.id)}>Notifications</button>
                         <button style={actionBtn} onClick={() => onSendMessage(d.id, "call", d.imei)}>Push Call</button>
                         <button style={actionBtn} onClick={() => startAudioCall(d)}>Audio Call</button>
