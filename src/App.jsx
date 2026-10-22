@@ -609,6 +609,7 @@ function Devices({ onSendMessage }) {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [latestVersionCode, setLatestVersionCode] = useState(null);
+  const [confirmRelease, setConfirmRelease] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [sending, setSending] = useState(false);
@@ -826,6 +827,25 @@ function Devices({ onSendMessage }) {
       code: "Update requested",
       note: "The phone will fetch the latest version on its next check-in — right away if it's online, otherwise when it next polls, is locked/unlocked, or the app is opened.",
     });
+  }
+
+  // Sends a plain command (no lock-state change) + wakes the phone. Used for the remote
+  // handover/release actions, whose on-device buttons are unreachable after handover.
+  async function sendRawCommand(device, command) {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+  }
+
+  function undoHandover(device) {
+    sendRawCommand(device, "UNDO_HANDOVER");
+    setCodeDialog({ code: "Undo handover sent", note: "On its next check-in the phone will show its app icon again and lift the factory-reset / safe-boot lockdown. It stays managed (still device owner)." });
+  }
+
+  function doRelease(device) {
+    sendRawCommand(device, "RELEASE");
+    setConfirmRelease(null);
+    setCodeDialog({ code: "Release sent", note: "On its next check-in the phone will remove all management (FRP, restrictions, device owner) and can then be uninstalled — the phone is fully freed. Use this only for a paid-off / returned device." });
   }
 
   function showCode(device) {
@@ -1119,6 +1139,8 @@ function Devices({ onSendMessage }) {
                           <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => sendCommand(d, "LOCK")}>Lock</button>
                         )}
                         <button style={actionBtn} onClick={() => forceUpdate(d)}>Force Update</button>
+                        <button style={actionBtn} onClick={() => undoHandover(d)}>Undo Handover</button>
+                        <button style={{ ...S.dangerBtn, padding: "6px 12px", fontSize: 12.5 }} onClick={() => setConfirmRelease(d)}>Release</button>
                         <button style={actionBtn} onClick={() => onSendMessage(d.id)}>Notifications</button>
                         <button style={actionBtn} onClick={() => onSendMessage(d.id, "call", d.imei)}>Push Call</button>
                         <button style={actionBtn} onClick={() => startAudioCall(d)}>Audio Call</button>
@@ -1231,6 +1253,15 @@ function Devices({ onSendMessage }) {
           message={`${confirmDelete.device_model || confirmDelete.imei || "This device"} and its installment plans/payment history will be removed. This can't be undone.`}
           onConfirm={() => performDelete(confirmDelete)}
           onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {confirmRelease && (
+        <ConfirmDialog
+          title="Release device?"
+          message={`${confirmRelease.device_model || confirmRelease.imei || "This device"} will be FULLY un-managed on its next check-in — FRP, all restrictions and device owner removed, after which the app can be uninstalled and the phone is free. Only do this for a paid-off or returned device. This can't be undone remotely.`}
+          onConfirm={() => doRelease(confirmRelease)}
+          onCancel={() => setConfirmRelease(null)}
         />
       )}
 
