@@ -1,0 +1,10 @@
+project_id = "jslhwzsozfrgwptasjsz"
+
+# External-facing APIs: called by an outside system with the x-api-key header, NOT a
+# Supabase JWT, so JWT verification is turned off and the function checks the shared
+# EXTERNAL_API_KEY secret itself.
+[functions.device-lock-control]
+verify_jwt = false
+
+[functions.device-notify]
+verify_jwt = false
