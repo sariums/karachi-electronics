@@ -45,7 +45,7 @@ const DEFAULT_BRANDING = {
 };
 
 const BrandingContext = createContext({ ...DEFAULT_BRANDING, reload: () => {} });
-const BranchContext = createContext({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, licensesConsumed: 0, reload: () => {} });
+const BranchContext = createContext({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, licensesConsumed: 0, apiKey: null, reload: () => {} });
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -57,7 +57,7 @@ export default function App() {
   const [sendMessageTab, setSendMessageTab] = useState("popups");
   const [sendMessageImei, setSendMessageImei] = useState("");
   const [branding, setBranding] = useState(DEFAULT_BRANDING);
-  const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, licensesConsumed: 0 });
+  const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, licensesConsumed: 0, apiKey: null });
   const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
 
   async function loadProfile(userId) {
@@ -70,14 +70,16 @@ export default function App() {
       let branchName = "";
       let deviceLicenseLimit = 0;
       let licensesConsumed = 0;
+      let apiKey = null;
       if (branchId) {
-        const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit, licenses_consumed").eq("id", branchId).maybeSingle();
+        const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit, licenses_consumed, api_key").eq("id", branchId).maybeSingle();
         branchName = branchRow?.name || "";
         deviceLicenseLimit = branchRow?.device_license_limit || 0;
         licensesConsumed = branchRow?.licenses_consumed || 0;
+        apiKey = branchRow?.api_key || null;
       }
 
-      setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit, licensesConsumed });
+      setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit, licensesConsumed, apiKey });
       setAppMode(branchId ? "branch" : "super");
 
       if (branchId) {
@@ -169,6 +171,8 @@ export default function App() {
               {tab === "provisioningLogs" && <ProvisioningLogsPage />}
               {tab === "sendMessage" && <SendMessagePage initialDeviceId={sendMessageDeviceId} initialTab={sendMessageTab} initialImei={sendMessageImei} />}
               {tab === "generalSettings" && <GeneralSettingsPage />}
+              {tab === "apiKeys" && <ApiKeysPage />}
+              {tab === "apiDocs" && <ApiDocsPage />}
               {tab === "roles" && <RolesList />}
               {tab === "accounts" && <AccountManagement />}
             </main>
@@ -334,6 +338,12 @@ function Sidebar({ tab, setTab }) {
       group: "Settings Management", tourKey: "nav-settings-management", icon: Settings, items: [
         { id: "roles", label: "Role List", icon: ShieldCheck },
         { id: "accounts", label: "Account Management", icon: UserCog },
+      ],
+    },
+    {
+      group: "API Management", tourKey: "nav-api-management", icon: KeyRound, items: [
+        { id: "apiKeys", label: "Keys", icon: KeyRound },
+        { id: "apiDocs", label: "Documentation", icon: HelpCircle },
       ],
     },
   ];
@@ -3157,6 +3167,232 @@ function AccountManagement() {
   );
 }
 
+/* ---------------- EXTERNAL API ACCESS ---------------- */
+
+const API_BASE = "https://jslhwzsozfrgwptasjsz.supabase.co/functions/v1";
+
+function ApiCodeBlock({ children }) {
+  return (
+    <pre style={{
+      background: "#14161C", color: "#E6E8EC", padding: "12px 14px", borderRadius: 8,
+      fontSize: 12.5, overflowX: "auto", fontFamily: "ui-monospace, Menlo, monospace",
+      lineHeight: 1.5, margin: "8px 0", whiteSpace: "pre",
+    }}>{children}</pre>
+  );
+}
+
+function ApiCopyBtn({ text, label = "Copy" }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button type="button" style={{ ...S.secondaryBtn, padding: "5px 10px", fontSize: 12 }}
+      onClick={async () => { try { await navigator.clipboard.writeText(text || ""); setDone(true); setTimeout(() => setDone(false), 1500); } catch {} }}>
+      {done ? "Copied ✓" : label}
+    </button>
+  );
+}
+
+/** Masked key with Show / Copy / (optional) Regenerate. */
+function ApiKeyRow({ apiKey, onRegenerate, regenerating }) {
+  const [shown, setShown] = useState(false);
+  const masked = apiKey ? `${apiKey.slice(0, 11)}${"•".repeat(16)}${apiKey.slice(-4)}` : "—";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <code style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13, background: "#F5F6F8", padding: "7px 11px", borderRadius: 6, border: "1px solid #E6E8EC", wordBreak: "break-all" }}>
+        {shown ? (apiKey || "—") : masked}
+      </code>
+      <button type="button" style={{ ...S.secondaryBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => setShown((s) => !s)}>{shown ? "Hide" : "Show"}</button>
+      <ApiCopyBtn text={apiKey} />
+      {onRegenerate && (
+        <button type="button" style={{ ...S.secondaryBtn, padding: "5px 10px", fontSize: 12 }} onClick={onRegenerate} disabled={regenerating}>
+          {regenerating ? "Regenerating…" : "Regenerate"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The actual documentation — endpoints, bodies, responses, errors, examples. The
+ * example commands use `sampleKey` (the viewer's own branch key) when available. */
+function ApiDocsContent({ sampleKey }) {
+  const k = sampleKey || "<YOUR_API_KEY>";
+  const lockCurl =
+`curl -X POST ${API_BASE}/device-lock-control \\
+  -H "x-api-key: ${k}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"imei":"123456789012345","action":"lock"}'`;
+  const popupCurl =
+`curl -X POST ${API_BASE}/device-notify \\
+  -H "x-api-key: ${k}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"imei":"123456789012345","type":"popup","title":"Payment reminder","message":"Your installment is due."}'`;
+  const h3 = { fontSize: 15, fontWeight: 700, color: "#14161C", margin: "22px 0 6px" };
+  const p = { fontSize: 13.5, color: "#3A3F4B", lineHeight: 1.6, margin: "6px 0" };
+  const codeInline = { fontFamily: "ui-monospace, Menlo, monospace", background: "#F0F1F3", padding: "1px 5px", borderRadius: 4, fontSize: 12.5 };
+  return (
+    <div>
+      <p style={p}>
+        These two HTTPS endpoints let an outside system control your phones by <strong>IMEI</strong>.
+        Every request is a <code style={codeInline}>POST</code> with a JSON body and your branch's
+        <code style={codeInline}>x-api-key</code> header. The phone reacts within a few seconds; if it's
+        offline the change still applies on its next check-in.
+      </p>
+      <p style={p}><strong>Base URL:</strong> <code style={codeInline}>{API_BASE}</code></p>
+
+      <h3 style={h3}>1. Lock / Unlock</h3>
+      <p style={p}><code style={codeInline}>POST /device-lock-control</code></p>
+      <p style={{ ...p, marginBottom: 0 }}>Request body:</p>
+      <ApiCodeBlock>{`{ "imei": "123456789012345", "action": "lock" }   // or "unlock"`}</ApiCodeBlock>
+      <p style={{ ...p, marginBottom: 0 }}>Success (200):</p>
+      <ApiCodeBlock>{`{ "ok": true, "action": "lock", "is_locked": true, "pushed": true }`}</ApiCodeBlock>
+
+      <h3 style={h3}>2. Notification / Popup</h3>
+      <p style={p}><code style={codeInline}>POST /device-notify</code></p>
+      <p style={{ ...p, marginBottom: 0 }}>Request body (<code style={codeInline}>type</code>: <code style={codeInline}>"popup"</code> full screen, or <code style={codeInline}>"notify"</code>; default <code style={codeInline}>"notify"</code>):</p>
+      <ApiCodeBlock>{`{
+  "imei": "123456789012345",
+  "type": "popup",
+  "title": "Payment reminder",
+  "message": "Your installment is due."
+}`}</ApiCodeBlock>
+      <p style={{ ...p, marginBottom: 0 }}>Success (200):</p>
+      <ApiCodeBlock>{`{ "ok": true, "type": "popup", "pushed": true }`}</ApiCodeBlock>
+
+      <h3 style={h3}>Errors</h3>
+      <div style={S.tableCard}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Status", "Meaning"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {[
+              ["400", "Bad body — missing/invalid imei, action, type, or message"],
+              ["401", "Missing or wrong x-api-key"],
+              ["404", "No device with that IMEI in your branch"],
+              ["500", "Server/database error (details in the body)"],
+            ].map((r) => (
+              <tr key={r[0]} style={S.tr}><td style={S.td} className="mono">{r[0]}</td><td style={S.td}>{r[1]}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style={h3}>Examples</h3>
+      <p style={{ ...p, marginBottom: 2 }}>Lock a phone <span style={{ display: "inline-block", marginLeft: 6 }}><ApiCopyBtn text={lockCurl} label="Copy command" /></span></p>
+      <ApiCodeBlock>{lockCurl}</ApiCodeBlock>
+      <p style={{ ...p, marginBottom: 2 }}>Send a popup <span style={{ display: "inline-block", marginLeft: 6 }}><ApiCopyBtn text={popupCurl} label="Copy command" /></span></p>
+      <ApiCodeBlock>{popupCurl}</ApiCodeBlock>
+      <p style={{ ...p, color: "#9AA1AE", fontSize: 12 }}>
+        Replace the IMEI with the target phone's IMEI. <code style={codeInline}>action</code> is
+        <code style={codeInline}>"lock"</code> or <code style={codeInline}>"unlock"</code>. Unlock uses the same URL as lock.
+      </p>
+    </div>
+  );
+}
+
+/** Branch portal · API Management › Keys — this branch's own key + regenerate. */
+function ApiKeysPage() {
+  const { branchId, apiKey, reload } = useContext(BranchContext);
+  const [key, setKey] = useState(apiKey);
+  const [regenerating, setRegenerating] = useState(false);
+  useEffect(() => { setKey(apiKey); }, [apiKey]);
+
+  async function regenerate() {
+    if (!window.confirm("Regenerate this branch's API key?\n\nThe current key will stop working immediately — any outside system using it must be updated with the new key.")) return;
+    setRegenerating(true);
+    const { data, error } = await supabase.rpc("regenerate_branch_api_key", { p_branch_id: branchId });
+    setRegenerating(false);
+    if (error) { window.alert(error.message); return; }
+    if (data) { setKey(data); reload?.(); }
+  }
+
+  return (
+    <div>
+      <PageHeader eyebrow="API Management" title="Keys" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 20px", maxWidth: 620 }}>
+        This key lets an outside system lock/unlock and message <strong>this branch's</strong> phones by IMEI.
+        It cannot touch other branches' devices. See the Documentation tab for how to use it.
+      </p>
+
+      <SettingsCard title="Your branch API key" description="Send this in the x-api-key header on every request. Keep it secret — treat it like a password.">
+        <ApiKeyRow apiKey={key} onRegenerate={regenerate} regenerating={regenerating} />
+      </SettingsCard>
+    </div>
+  );
+}
+
+/** Branch portal · API Management › Documentation — the endpoints + examples, using this branch's key. */
+function ApiDocsPage() {
+  const { apiKey } = useContext(BranchContext);
+  return (
+    <div>
+      <PageHeader eyebrow="API Management" title="Documentation" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 20px", maxWidth: 620 }}>
+        The external lock/unlock and notification APIs. Examples below use this branch's key — copy them and
+        replace the IMEI with the target phone.
+      </p>
+      <div style={{ ...S.tableCard, padding: 20 }}>
+        <ApiDocsContent sampleKey={apiKey} />
+      </div>
+    </div>
+  );
+}
+
+/** Super admin portal: documentation + every branch's key, each regenerable. */
+function SuperAdminApiPage({ branches, reload }) {
+  const [busyId, setBusyId] = useState(null);
+  const [shownId, setShownId] = useState(null);
+
+  async function regenerate(branchId) {
+    if (!window.confirm("Regenerate this branch's API key?\n\nThe current key will stop working immediately.")) return;
+    setBusyId(branchId);
+    const { error } = await supabase.rpc("regenerate_branch_api_key", { p_branch_id: branchId });
+    setBusyId(null);
+    if (error) { window.alert(error.message); return; }
+    reload?.();
+  }
+
+  return (
+    <div>
+      <PageHeader eyebrow="Super Admin" title="API Access" />
+      <p style={{ fontSize: 13, color: "#6B7280", margin: "-20px 0 20px", maxWidth: 620 }}>
+        Each branch has its own API key for the external lock/notify APIs. A key only controls that branch's
+        own devices.
+      </p>
+
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Branch keys</h3>
+      <div style={{ ...S.tableCard, marginBottom: 28 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Branch", "API key", ""].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {(!branches || branches.length === 0) && <tr><td colSpan={3} style={S.emptyCell}>No branches yet.</td></tr>}
+            {(branches || []).map((b) => {
+              const shown = shownId === b.id;
+              const masked = b.api_key ? `${b.api_key.slice(0, 11)}${"•".repeat(12)}${b.api_key.slice(-4)}` : "—";
+              return (
+                <tr key={b.id} style={S.tr}>
+                  <td style={S.td}>{b.name}</td>
+                  <td style={S.td}>
+                    <code style={{ fontFamily: "ui-monospace, Menlo, monospace", fontSize: 12.5, wordBreak: "break-all" }}>
+                      {shown ? (b.api_key || "—") : masked}
+                    </code>
+                  </td>
+                  <td style={{ ...S.td, textAlign: "right", whiteSpace: "nowrap" }}>
+                    <button type="button" style={{ ...S.secondaryBtn, padding: "5px 10px", fontSize: 12, marginRight: 6 }} onClick={() => setShownId(shown ? null : b.id)}>{shown ? "Hide" : "Show"}</button>
+                    <span style={{ marginRight: 6 }}><ApiCopyBtn text={b.api_key} /></span>
+                    <button type="button" style={{ ...S.secondaryBtn, padding: "5px 10px", fontSize: 12 }} onClick={() => regenerate(b.id)} disabled={busyId === b.id}>{busyId === b.id ? "…" : "Regenerate"}</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ ...S.tableCard, padding: 20 }}>
+        <ApiDocsContent sampleKey={null} />
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- SUPER ADMIN ---------------- */
 
 function SuperAdminSidebar({ saTab, setSaTab }) {
@@ -3164,6 +3400,7 @@ function SuperAdminSidebar({ saTab, setSaTab }) {
     { id: "overview", label: "Overview", icon: LayoutDashboard },
     { id: "branches", label: "Branches", icon: Smartphone },
     { id: "provisioningLogs", label: "Provisioning Logs", icon: History },
+    { id: "apiDocs", label: "API Access", icon: KeyRound },
     { id: "tickets", label: "Tickets", icon: Ticket },
   ];
   return (
@@ -3241,18 +3478,21 @@ function SuperAdminOverview({ branches, deviceCounts, branchAdmins = {}, loading
 function BranchDetail({ branch, usedCount, onBack }) {
   const [devices, setDevices] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [logRows, setLogRows] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { load(); }, [branch.id]);
 
   async function load() {
     setLoading(true);
-    const [{ data: deviceRows }, { data: staffRows }] = await Promise.all([
+    const [{ data: deviceRows }, { data: staffRows }, { data: logs }] = await Promise.all([
       supabase.from("devices").select("*").eq("branch_id", branch.id).order("provisioned_at", { ascending: false }),
       supabase.from("admin_users").select("*").eq("branch_id", branch.id).order("invited_at", { ascending: false }),
+      supabase.from("license_log").select("*").eq("branch_id", branch.id).order("created_at", { ascending: false }),
     ]);
     setDevices(deviceRows || []);
     setStaff(staffRows || []);
+    setLogRows(logs || []);
     setLoading(false);
   }
 
@@ -3272,6 +3512,31 @@ function BranchDetail({ branch, usedCount, onBack }) {
         <StatCard label="Remaining" value={remaining} />
         <StatCard label="Activated" value={activated} />
         <StatCard label="Pending" value={pending} />
+      </div>
+
+      <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>License log</h3>
+      <p style={{ fontSize: 12.5, color: "#9AA1AE", margin: "0 0 12px" }}>Date-wise record of licenses added and used (one per device enrolled). Used licenses are never refunded.</p>
+      <div style={{ ...S.tableCard, marginBottom: 28 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>{["Date", "Event", "Amount", "Detail"].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={4} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && logRows.length === 0 && <tr><td colSpan={4} style={S.emptyCell}>No license activity yet.</td></tr>}
+            {logRows.map((l) => {
+              const added = l.event_type === "add";
+              return (
+                <tr key={l.id} style={S.tr}>
+                  <td style={S.td} className="mono">{new Date(l.created_at).toLocaleDateString()} {new Date(l.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</td>
+                  <td style={S.td}>
+                    <span style={{ ...S.badge, background: added ? "#E6F7EF" : "#FEF3E7", color: added ? "#1E8E5A" : "#B4690E" }}>{added ? "Added" : "Used"}</span>
+                  </td>
+                  <td style={{ ...S.td, fontWeight: 600, color: added ? "#1E8E5A" : "#B4690E" }}>{added ? `+${l.amount}` : `−${l.amount}`}</td>
+                  <td style={S.td}>{l.note || "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       <h3 className="serif" style={{ fontSize: 16, color: "#14161C", margin: "0 0 12px" }}>Devices</h3>
@@ -3802,6 +4067,7 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
   const [branches, setBranches] = useState([]);
   const [deviceCounts, setDeviceCounts] = useState({});
   const [branchAdmins, setBranchAdmins] = useState({}); // branch_id -> [email]
+  const [branchOwners, setBranchOwners] = useState({}); // branch_id -> { id, email } (Owner admin)
   const [loading, setLoading] = useState(true);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [draft, setDraft] = useState({ name: "", limit: "", adminName: "", adminEmail: "" });
@@ -3811,6 +4077,9 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
   const [savingLimit, setSavingLimit] = useState(false);
   const [editName, setEditName] = useState(null); // { id, value }
   const [savingName, setSavingName] = useState(false);
+  const [editEmail, setEditEmail] = useState(null); // { branchId, userId, value }
+  const [savingEmail, setSavingEmail] = useState(false);
+  const [emailMsg, setEmailMsg] = useState("");
   const [tourOpen, setTourOpen] = useState(false);
 
   const tourSteps = [
@@ -3829,21 +4098,23 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     const [{ data: branchRows }, { data: deviceRows }, { data: adminRows }] = await Promise.all([
       supabase.from("branches").select("*").order("created_at", { ascending: false }),
       supabase.from("devices").select("branch_id"),
-      supabase.from("admin_users").select("branch_id, email, role"),
+      supabase.from("admin_users").select("id, branch_id, email, role"),
     ]);
     setBranches(branchRows || []);
     const counts = {};
     (deviceRows || []).forEach((d) => { counts[d.branch_id] = (counts[d.branch_id] || 0) + 1; });
     setDeviceCounts(counts);
     const admins = {};
+    const owners = {};
     (adminRows || []).forEach((a) => {
       if (!a.branch_id || !a.email) return;
       if (!admins[a.branch_id]) admins[a.branch_id] = [];
       // Put the branch Owner first so it shows as the primary admin email.
-      if (a.role === "Owner") admins[a.branch_id].unshift(a.email);
+      if (a.role === "Owner") { admins[a.branch_id].unshift(a.email); owners[a.branch_id] = { id: a.id, email: a.email }; }
       else admins[a.branch_id].push(a.email);
     });
     setBranchAdmins(admins);
+    setBranchOwners(owners);
     setLoading(false);
   }
 
@@ -3859,9 +4130,10 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     if (Object.keys(e).length) return;
 
     setCreating(true);
+    const newApiKey = "keapi_" + crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
     const { data: branch, error: branchErr } = await supabase
       .from("branches")
-      .insert({ name: draft.name.trim(), device_license_limit: Number(draft.limit) })
+      .insert({ name: draft.name.trim(), device_license_limit: Number(draft.limit), api_key: newApiKey })
       .select()
       .single();
     if (branchErr) { setCreating(false); setErrors({ form: branchErr.message }); return; }
@@ -3890,10 +4162,10 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     const b = branches.find((x) => x.id === editLimit.id);
     if (!b) return;
     setSavingLimit(true);
-    await supabase.from("branches")
-      .update({ device_license_limit: (b.device_license_limit || 0) + Number(editLimit.value) })
-      .eq("id", editLimit.id);
+    // Goes through an RPC so the increment AND the license-log entry happen together.
+    const { error } = await supabase.rpc("add_branch_licenses", { p_branch_id: editLimit.id, p_amount: Number(editLimit.value) });
     setSavingLimit(false);
+    if (error) { window.alert(error.message); return; }
     setEditLimit(null);
     load();
   }
@@ -3904,6 +4176,23 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     await supabase.from("branches").update({ name: editName.value.trim() }).eq("id", editName.id);
     setSavingName(false);
     setEditName(null);
+    load();
+  }
+
+  async function saveEmail() {
+    if (!editEmail) return;
+    const newEmail = editEmail.value.trim();
+    if (!newEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail)) { setEmailMsg("Enter a valid email."); return; }
+    setSavingEmail(true);
+    setEmailMsg("");
+    // Changing a login email needs the auth admin API (service role), so it goes
+    // through an edge function; it updates both the Auth user and admin_users.
+    const { data, error } = await supabase.functions.invoke("update-admin-email", {
+      body: { user_id: editEmail.userId, new_email: newEmail },
+    });
+    setSavingEmail(false);
+    if (error || !data?.success) { setEmailMsg(data?.reason || error?.message || "Could not update the email."); return; }
+    setEditEmail(null);
     load();
   }
 
@@ -3937,6 +4226,8 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
           {saTab === "overview" && <SuperAdminOverview branches={branches} deviceCounts={deviceCounts} branchAdmins={branchAdmins} loading={loading} />}
 
           {saTab === "provisioningLogs" && <ProvisioningLogsPage allBranches />}
+
+          {saTab === "apiDocs" && <SuperAdminApiPage branches={branches} reload={load} />}
 
           {saTab === "tickets" && <TicketsPage email={email} isSuperAdmin={true} branches={branches} />}
 
@@ -3984,14 +4275,36 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
                             )}
                           </td>
                           <td style={S.td}>
-                            {(() => {
+                            {editEmail?.branchId === b.id ? (
+                              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                                <input
+                                  style={{ ...S.input, width: 200, padding: "6px 10px" }}
+                                  type="email"
+                                  value={editEmail.value}
+                                  onChange={(e) => setEditEmail({ ...editEmail, value: e.target.value })}
+                                  placeholder="owner@branch.com"
+                                  autoFocus
+                                />
+                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveEmail} disabled={savingEmail}>{savingEmail ? "Saving…" : "Save"}</button>
+                                <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => { setEditEmail(null); setEmailMsg(""); }}>Cancel</button>
+                                {emailMsg && <span style={{ fontSize: 11, color: "#D6414C", width: "100%" }}>{emailMsg}</span>}
+                              </div>
+                            ) : (() => {
                               const emails = branchAdmins[b.id] || [];
-                              if (!emails.length) return <span style={{ color: "#9AA1AE" }}>—</span>;
+                              const owner = branchOwners[b.id];
+                              if (!emails.length) {
+                                return owner ? null : <span style={{ color: "#9AA1AE" }}>—</span>;
+                              }
                               return (
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                                   <span className="mono">{emails[0]}</span>
                                   {emails.length > 1 && (
                                     <span style={{ fontSize: 11, color: "#9AA1AE" }} title={emails.join(", ")}>+{emails.length - 1}</span>
+                                  )}
+                                  {owner && (
+                                    <span style={{ cursor: "pointer", display: "inline-flex" }} title="Edit admin email" onClick={() => { setEmailMsg(""); setEditEmail({ branchId: b.id, userId: owner.id, value: owner.email }); }}>
+                                      <Pencil size={12} color="#9AA1AE" />
+                                    </span>
                                   )}
                                 </span>
                               );

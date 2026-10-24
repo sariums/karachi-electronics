@@ -10,18 +10,19 @@
 //
 // Request:
 //   POST  https://<project>.functions.supabase.co/device-lock-control
-//   Header:  x-api-key: <EXTERNAL_API_KEY secret>
+//   Header:  x-api-key: <the branch's api_key>
 //   Body:    { "imei": "357521141912430", "action": "lock" }   // or "unlock"
 //
 // Response (200):
 //   { "ok": true, "imei": "...", "action": "lock", "device_id": "...",
 //     "is_locked": true, "pushed": true }
 //
-// Required secrets (same project, set via `supabase secrets set` or the Dashboard):
-//   EXTERNAL_API_KEY               — the shared key the outside system must send
-//   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   — provided automatically by Supabase
-//   FIREBASE_SERVICE_ACCOUNT_JSON  — full Firebase service account key (for FCM)
-//   FCM_PROJECT_ID                 — the Firebase project id
+// Auth is PER-BRANCH: the x-api-key is a branch's own key (branches.api_key). It
+// identifies the branch and limits control to THAT branch's devices only — a key
+// cannot touch another branch's phones.
+//
+// Required secrets (same project): SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (auto),
+//   FIREBASE_SERVICE_ACCOUNT_JSON (Firebase service account key for FCM), FCM_PROJECT_ID.
 //
 // Deploy with JWT verification OFF so the outside system can call it with just the
 // x-api-key header (not a Supabase JWT): see supabase/config.toml.
@@ -46,14 +47,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Use POST" }, 405);
 
-  // ---- 1. Authenticate the caller with the shared API key -------------------
-  const expectedKey = Deno.env.get("EXTERNAL_API_KEY");
   const providedKey = req.headers.get("x-api-key");
-  if (!expectedKey || !providedKey || providedKey !== expectedKey) {
-    return json({ error: "unauthorized" }, 401);
-  }
+  if (!providedKey) return json({ error: "unauthorized" }, 401);
 
-  // ---- 2. Validate the request body ----------------------------------------
+  // ---- 1. Validate the request body ----------------------------------------
   let body: { imei?: string; action?: string };
   try {
     body = await req.json();
@@ -72,14 +69,26 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // ---- 3. Find the device by IMEI ------------------------------------------
+  // ---- 2. Authenticate: the API key identifies a BRANCH --------------------
+  // Each branch has its own key, so a key can only ever touch that branch's own
+  // devices. An unknown key is a 401; a valid key scopes everything below to its branch.
+  const { data: branch, error: keyErr } = await supabase
+    .from("branches")
+    .select("id")
+    .eq("api_key", providedKey)
+    .maybeSingle();
+  if (keyErr) return json({ error: keyErr.message }, 500);
+  if (!branch) return json({ error: "unauthorized" }, 401);
+
+  // ---- 3. Find the device by IMEI *within that branch* ---------------------
   const { data: device, error: findErr } = await supabase
     .from("devices")
     .select("id, is_locked, fcm_token")
     .eq("imei", imei)
+    .eq("branch_id", branch.id)
     .maybeSingle();
   if (findErr) return json({ error: findErr.message }, 500);
-  if (!device) return json({ error: "device not found for imei", imei }, 404);
+  if (!device) return json({ error: "device not found for imei in this branch", imei }, 404);
 
   const lock = action === "lock";
   const command = lock ? "LOCK" : "UNLOCK";

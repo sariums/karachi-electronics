@@ -9,7 +9,7 @@
 //
 // Request:
 //   POST  https://<project>.functions.supabase.co/device-notify
-//   Header:  x-api-key: <EXTERNAL_API_KEY secret>
+//   Header:  x-api-key: <the branch's api_key>
 //   Body:    { "imei": "357521141912430",
 //              "type": "popup",            // "popup" (full screen) or "notify" (notification); default "notify"
 //              "title": "Payment overdue",
@@ -18,8 +18,11 @@
 // Response (200):
 //   { "ok": true, "imei": "...", "type": "popup", "device_id": "...", "pushed": true }
 //
-// Required secrets (same project): EXTERNAL_API_KEY, SUPABASE_URL,
-//   SUPABASE_SERVICE_ROLE_KEY, FIREBASE_SERVICE_ACCOUNT_JSON, FCM_PROJECT_ID.
+// Auth is PER-BRANCH: the x-api-key is a branch's own key (branches.api_key); it
+// limits messaging to THAT branch's devices only.
+//
+// Required secrets (same project): SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
+//   FIREBASE_SERVICE_ACCOUNT_JSON, FCM_PROJECT_ID.
 //
 // Deploy with JWT verification OFF (see supabase/config.toml) so the outside system
 // can call it with just the x-api-key header.
@@ -44,14 +47,10 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "Use POST" }, 405);
 
-  // ---- 1. Authenticate the caller with the shared API key -------------------
-  const expectedKey = Deno.env.get("EXTERNAL_API_KEY");
   const providedKey = req.headers.get("x-api-key");
-  if (!expectedKey || !providedKey || providedKey !== expectedKey) {
-    return json({ error: "unauthorized" }, 401);
-  }
+  if (!providedKey) return json({ error: "unauthorized" }, 401);
 
-  // ---- 2. Validate the request body ----------------------------------------
+  // ---- 1. Validate the request body ----------------------------------------
   let body: { imei?: string; type?: string; title?: string; message?: string };
   try {
     body = await req.json();
@@ -76,14 +75,26 @@ Deno.serve(async (req) => {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  // ---- 3. Find the device by IMEI ------------------------------------------
+  // ---- 2. Authenticate: the API key identifies a BRANCH --------------------
+  // Each branch has its own key, so a key can only ever reach that branch's own
+  // devices. Unknown key -> 401; a valid key scopes the device lookup to its branch.
+  const { data: branch, error: keyErr } = await supabase
+    .from("branches")
+    .select("id")
+    .eq("api_key", providedKey)
+    .maybeSingle();
+  if (keyErr) return json({ error: keyErr.message }, 500);
+  if (!branch) return json({ error: "unauthorized" }, 401);
+
+  // ---- 3. Find the device by IMEI *within that branch* ---------------------
   const { data: device, error: findErr } = await supabase
     .from("devices")
     .select("id, fcm_token")
     .eq("imei", imei)
+    .eq("branch_id", branch.id)
     .maybeSingle();
   if (findErr) return json({ error: findErr.message }, 500);
-  if (!device) return json({ error: "device not found for imei", imei }, 404);
+  if (!device) return json({ error: "device not found for imei in this branch", imei }, 404);
 
   // ---- 4. Queue the popup/notification (what the phone reads on poll) -------
   const { error: cmdErr } = await supabase.from("device_commands").insert({

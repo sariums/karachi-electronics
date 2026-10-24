@@ -5,3 +5,6 @@ dist
 
 # External API shared key (never commit)
 EXTERNAL_API_CREDENTIALS.txt
+
+# Supabase CLI local artifacts
+supabase/.temp/
