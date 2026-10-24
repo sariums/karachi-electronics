@@ -45,7 +45,7 @@ const DEFAULT_BRANDING = {
 };
 
 const BrandingContext = createContext({ ...DEFAULT_BRANDING, reload: () => {} });
-const BranchContext = createContext({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, reload: () => {} });
+const BranchContext = createContext({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, licensesConsumed: 0, reload: () => {} });
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -57,7 +57,7 @@ export default function App() {
   const [sendMessageTab, setSendMessageTab] = useState("popups");
   const [sendMessageImei, setSendMessageImei] = useState("");
   const [branding, setBranding] = useState(DEFAULT_BRANDING);
-  const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0 });
+  const [profile, setProfile] = useState({ branchId: null, branchName: "", isSuperAdmin: false, deviceLicenseLimit: 0, licensesConsumed: 0 });
   const [appMode, setAppMode] = useState("branch"); // "branch" | "super"
 
   async function loadProfile(userId) {
@@ -69,13 +69,15 @@ export default function App() {
 
       let branchName = "";
       let deviceLicenseLimit = 0;
+      let licensesConsumed = 0;
       if (branchId) {
-        const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit").eq("id", branchId).maybeSingle();
+        const { data: branchRow } = await supabase.from("branches").select("name, device_license_limit, licenses_consumed").eq("id", branchId).maybeSingle();
         branchName = branchRow?.name || "";
         deviceLicenseLimit = branchRow?.device_license_limit || 0;
+        licensesConsumed = branchRow?.licenses_consumed || 0;
       }
 
-      setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit });
+      setProfile({ branchId, branchName, isSuperAdmin, deviceLicenseLimit, licensesConsumed });
       setAppMode(branchId ? "branch" : "super");
 
       if (branchId) {
@@ -411,7 +413,7 @@ function QuickOpTile({ icon: Icon, label, onClick }) {
 }
 
 function Dashboard({ setTab, setDeviceSettingsTab }) {
-  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
+  const { branchId, deviceLicenseLimit, licensesConsumed, reload: reloadBranch } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
   const [removalLog, setRemovalLog] = useState([]);
   const [overdueList, setOverdueList] = useState([]);
@@ -454,7 +456,9 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
   const totalLicenses = deviceLicenseLimit;
   const activatedDevices = devices.filter((d) => d.last_seen_at).length;
   const pendingDevices = devices.length - activatedDevices;
-  const remainingLicenses = Math.max(totalLicenses - devices.length, 0);
+  // Licenses are consumed per device ever added and never refunded on delete, so
+  // "remaining" is driven by the stored consumed counter, not the live device count.
+  const remainingLicenses = Math.max(totalLicenses - licensesConsumed, 0);
   const activeDevices = devices.length;
   const removedDevices = removalLog.length;
 
@@ -605,7 +609,7 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
 /* ---------------- DEVICES ---------------- */
 
 function Devices({ onSendMessage }) {
-  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
+  const { branchId, deviceLicenseLimit, licensesConsumed, reload: reloadBranch } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [latestVersionCode, setLatestVersionCode] = useState(null);
@@ -694,10 +698,12 @@ function Devices({ onSendMessage }) {
 
   async function addDevice() {
     if (!(addDeviceDraft.device_model || "").trim()) { setError("Enter a device model."); return; }
-    if (devices.length >= deviceLicenseLimit) { setError(`Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to raise it.`); return; }
+    // Licenses are consumed on add and never refunded, so the gate is the consumed
+    // counter, not the live device count. The DB trigger enforces this atomically too.
+    if (licensesConsumed >= deviceLicenseLimit) { setError(`Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to add more licenses.`); return; }
     setError("");
     const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
-    await supabase.from("devices").insert({
+    const { error: insErr } = await supabase.from("devices").insert({
       device_model: addDeviceDraft.device_model.trim(),
       imei: (addDeviceDraft.imei || "").trim() || null,
       device_tag: (addDeviceDraft.device_tag || "").trim() || null,
@@ -705,8 +711,15 @@ function Devices({ onSendMessage }) {
       unlock_pin_generated_at: new Date().toISOString(),
       branch_id: branchId,
     });
+    if (insErr) {
+      setError(/LICENSE_LIMIT_REACHED/.test(insErr.message)
+        ? `Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to add more licenses.`
+        : insErr.message);
+      return;
+    }
     setAddDeviceDraft({ device_model: "", imei: "", device_tag: "" });
     setAddDeviceOpen(false);
+    reloadBranch?.();
     load();
   }
 
@@ -1024,9 +1037,9 @@ function Devices({ onSendMessage }) {
       total: deviceLicenseLimit,
       activated,
       pending: devices.length - activated,
-      remaining: Math.max(deviceLicenseLimit - devices.length, 0),
+      remaining: Math.max(deviceLicenseLimit - licensesConsumed, 0),
     };
-  }, [devices, deviceLicenseLimit]);
+  }, [devices, deviceLicenseLimit, licensesConsumed]);
 
   function resetFilters() {
     setStatusFilter("all");
@@ -1368,7 +1381,7 @@ function UploadXlsBox() {
 }
 
 function DeviceSettingsPage({ initialTab }) {
-  const { branchId, deviceLicenseLimit } = useContext(BranchContext);
+  const { branchId, deviceLicenseLimit, licensesConsumed, reload: reloadBranch } = useContext(BranchContext);
   const [activeTab, setActiveTab] = useState(initialTab || "enroll");
   const [unitType, setUnitType] = useState("single");
   const [imei, setImei] = useState("");
@@ -1412,10 +1425,11 @@ function DeviceSettingsPage({ initialTab }) {
     if (!trimmed) { setEnrollMsg("Enter an IMEI."); return; }
     setEnrolling(true);
     setEnrollMsg("");
-    const { count } = await supabase.from("devices").select("*", { count: "exact", head: true });
-    if ((count || 0) >= deviceLicenseLimit) {
+    // Gate on consumed licenses (monotonic, never refunded) rather than the current
+    // device count; the DB trigger is the authoritative enforcer.
+    if (licensesConsumed >= deviceLicenseLimit) {
       setEnrolling(false);
-      setEnrollMsg(`Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to raise it.`);
+      setEnrollMsg(`Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to add more licenses.`);
       return;
     }
     const unlock_pin = String(Math.floor(100000 + Math.random() * 900000));
@@ -1427,10 +1441,14 @@ function DeviceSettingsPage({ initialTab }) {
       branch_id: branchId,
     });
     setEnrolling(false);
-    if (error) setEnrollMsg(error.message);
-    else {
+    if (error) {
+      setEnrollMsg(/LICENSE_LIMIT_REACHED/.test(error.message)
+        ? `Branch license limit reached (${deviceLicenseLimit}). Ask the super admin to add more licenses.`
+        : error.message);
+    } else {
       setEnrollMsg("Device enrolled.");
       setImei("");
+      reloadBranch?.();
     }
   }
 
@@ -3169,7 +3187,8 @@ function SuperAdminSidebar({ saTab, setSaTab }) {
 function SuperAdminOverview({ branches, deviceCounts, branchAdmins = {}, loading }) {
   const totalBranches = branches.length;
   const totalCapacity = branches.reduce((sum, b) => sum + (b.device_license_limit || 0), 0);
-  const totalUsed = branches.reduce((sum, b) => sum + (deviceCounts[b.id] || 0), 0);
+  // "Used" is the consumed-license counter (monotonic, never refunded on device delete).
+  const totalUsed = branches.reduce((sum, b) => sum + (b.licenses_consumed || 0), 0);
   const totalRemaining = Math.max(totalCapacity - totalUsed, 0);
 
   return (
@@ -3190,7 +3209,7 @@ function SuperAdminOverview({ branches, deviceCounts, branchAdmins = {}, loading
             {loading && <tr><td colSpan={5} style={S.emptyCell}>Loading…</td></tr>}
             {!loading && branches.length === 0 && <tr><td colSpan={5} style={S.emptyCell}>No branches yet.</td></tr>}
             {branches.map((b) => {
-              const used = deviceCounts[b.id] || 0;
+              const used = b.licenses_consumed || 0;
               const remaining = Math.max(b.device_license_limit - used, 0);
               const emails = branchAdmins[b.id] || [];
               return (
@@ -3239,7 +3258,8 @@ function BranchDetail({ branch, usedCount, onBack }) {
 
   const activated = devices.filter((d) => d.last_seen_at).length;
   const pending = devices.length - activated;
-  const remaining = Math.max(branch.device_license_limit - devices.length, 0);
+  const consumed = branch.licenses_consumed || 0;
+  const remaining = Math.max(branch.device_license_limit - consumed, 0);
 
   return (
     <div>
@@ -3248,7 +3268,7 @@ function BranchDetail({ branch, usedCount, onBack }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 28 }}>
         <StatCard label="License limit" value={branch.device_license_limit} />
-        <StatCard label="Used" value={devices.length} />
+        <StatCard label="Used (consumed)" value={consumed} />
         <StatCard label="Remaining" value={remaining} />
         <StatCard label="Activated" value={activated} />
         <StatCard label="Pending" value={pending} />
@@ -3863,10 +3883,16 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     load();
   }
 
-  async function saveLimit() {
-    if (!editLimit || !editLimit.value || Number(editLimit.value) < 0) return;
+  // Licenses are never edited down — once a branch is created its allocation can only
+  // GROW. This adds the entered amount on top of the current limit (never replaces it).
+  async function addLicenses() {
+    if (!editLimit || !editLimit.value || Number(editLimit.value) <= 0) return;
+    const b = branches.find((x) => x.id === editLimit.id);
+    if (!b) return;
     setSavingLimit(true);
-    await supabase.from("branches").update({ device_license_limit: Number(editLimit.value) }).eq("id", editLimit.id);
+    await supabase.from("branches")
+      .update({ device_license_limit: (b.device_license_limit || 0) + Number(editLimit.value) })
+      .eq("id", editLimit.id);
     setSavingLimit(false);
     setEditLimit(null);
     load();
@@ -3934,7 +3960,7 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
                     {loading && <tr><td colSpan={7} style={S.emptyCell}>Loading…</td></tr>}
                     {!loading && branches.length === 0 && <tr><td colSpan={7} style={S.emptyCell}>No branches yet.</td></tr>}
                     {branches.map((b) => {
-                      const used = deviceCounts[b.id] || 0;
+                      const used = b.licenses_consumed || 0;
                       const remaining = Math.max(b.device_license_limit - used, 0);
                       const editing = editLimit?.id === b.id;
                       const editingName = editName?.id === b.id;
@@ -3977,16 +4003,27 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
                                 <input
                                   style={{ ...S.input, width: 90, padding: "6px 10px" }}
                                   type="number"
-                                  min="0"
+                                  min="1"
+                                  placeholder="Add"
                                   value={editLimit.value}
                                   onChange={(e) => setEditLimit({ ...editLimit, value: e.target.value })}
+                                  autoFocus
                                 />
-                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveLimit} disabled={savingLimit}>Save</button>
+                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={addLicenses} disabled={savingLimit}>{savingLimit ? "Adding…" : "Add"}</button>
                                 <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => setEditLimit(null)}>Cancel</button>
                               </div>
                             ) : (
-                              <span style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }} onClick={() => setEditLimit({ id: b.id, value: String(b.device_license_limit) })}>
-                                {b.device_license_limit} <Pencil size={12} color="#9AA1AE" />
+                              // Limit is add-only: no inline editing of the number, just a
+                              // button to add more licenses on top of the current allocation.
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                                <strong>{b.device_license_limit}</strong>
+                                <button
+                                  style={{ ...S.secondaryBtn, padding: "4px 9px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }}
+                                  onClick={() => setEditLimit({ id: b.id, value: "" })}
+                                  title="Add more licenses"
+                                >
+                                  <Plus size={12} /> Add
+                                </button>
                               </span>
                             )}
                           </td>
