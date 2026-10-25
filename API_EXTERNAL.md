@@ -1,7 +1,7 @@
 # External APIs — lock/unlock & notify by IMEI
 
 Two HTTPS endpoints an outside system can call to control a managed phone by its
-**IMEI**. Both are Supabase Edge Functions, authenticated with a shared key sent in the
+**IMEI**. Both are Supabase Edge Functions, authenticated with an API key sent in the
 `x-api-key` header (no Supabase login needed by the caller).
 
 Base URL: `https://jslhwzsozfrgwptasjsz.functions.supabase.co`
@@ -9,10 +9,14 @@ Base URL: `https://jslhwzsozfrgwptasjsz.functions.supabase.co`
 Auth header on every request:
 
 ```
-x-api-key: <EXTERNAL_API_KEY>
+x-api-key: <BRANCH_API_KEY>
 ```
 
-The key lives in `EXTERNAL_API_CREDENTIALS.txt` (gitignored) and as a Supabase secret.
+**Keys are per-branch.** Each branch has its own key, and a key can only control
+**that branch's own devices** (a call for another branch's IMEI returns 404). Find a
+branch's key in the admin panel → **API Management → Keys** (super admins see every
+branch's key under **API Access**, where they can also regenerate one). Keep it secret —
+treat it like a password. Regenerating a key makes the old one stop working immediately.
 
 ---
 
@@ -20,7 +24,7 @@ The key lives in `EXTERNAL_API_CREDENTIALS.txt` (gitignored) and as a Supabase s
 
 ```http
 POST https://jslhwzsozfrgwptasjsz.functions.supabase.co/device-lock-control
-x-api-key: <EXTERNAL_API_KEY>
+x-api-key: <BRANCH_API_KEY>
 Content-Type: application/json
 
 { "imei": "357521141912430", "action": "lock" }      // or "unlock"
@@ -42,7 +46,7 @@ push); if the push can't be delivered it still applies on the phone's next poll.
 
 ```http
 POST https://jslhwzsozfrgwptasjsz.functions.supabase.co/device-notify
-x-api-key: <EXTERNAL_API_KEY>
+x-api-key: <BRANCH_API_KEY>
 Content-Type: application/json
 
 { "imei": "357521141912430",
@@ -69,7 +73,7 @@ Success `200`:
 |--------|---------|
 | 400 | Bad body — missing/invalid `imei`, `action`, `type`, or `message` |
 | 401 | Missing or wrong `x-api-key` |
-| 404 | No device found for that IMEI |
+| 404 | No device with that IMEI in this branch |
 | 405 | Method not POST |
 | 500 | Server/database error (details in body) |
 
@@ -77,7 +81,7 @@ Success `200`:
 
 ```bash
 curl -X POST https://jslhwzsozfrgwptasjsz.functions.supabase.co/device-lock-control \
-  -H "x-api-key: <EXTERNAL_API_KEY>" \
+  -H "x-api-key: <BRANCH_API_KEY>" \
   -H "Content-Type: application/json" \
   -d '{"imei":"357521141912430","action":"lock"}'
 ```
