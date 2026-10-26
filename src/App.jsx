@@ -618,6 +618,18 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
 
 /* ---------------- DEVICES ---------------- */
 
+/** A device is "released" once the phone has acknowledged a RELEASE command and hasn't
+ * checked in since (the app un-manages itself and uninstalls, so it stops reporting). If
+ * the same IMEI is re-provisioned later, last_seen moves past the release and it counts
+ * as active again. */
+function isDeviceReleased(d) {
+  const relAck = (d.device_commands || [])
+    .filter((c) => c.command === "RELEASE" && c.acknowledged_at)
+    .sort((a, b) => new Date(b.acknowledged_at) - new Date(a.acknowledged_at))[0];
+  if (!relAck) return false;
+  return !(d.last_seen_at && new Date(d.last_seen_at) > new Date(relAck.acknowledged_at));
+}
+
 function Devices({ onSendMessage }) {
   const { branchId, deviceLicenseLimit, licensesConsumed, reload: reloadBranch } = useContext(BranchContext);
   const [devices, setDevices] = useState([]);
@@ -1029,8 +1041,10 @@ function Devices({ onSendMessage }) {
 
   const filteredDevices = useMemo(() => {
     return devices.filter((d) => {
-      if (statusFilter === "locked" && !d.is_locked) return false;
-      if (statusFilter === "active" && d.is_locked) return false;
+      const rel = isDeviceReleased(d);
+      if (statusFilter === "released" && !rel) return false;
+      if (statusFilter === "locked" && (rel || !d.is_locked)) return false;
+      if (statusFilter === "active" && (rel || d.is_locked)) return false;
       if (statusFilter === "noSim" && !d.sim_missing) return false;
       if (imeiFilter.trim() && !(d.imei || "").toLowerCase().includes(imeiFilter.trim().toLowerCase())) return false;
       if (modelFilter.trim() && !(d.device_model || "").toLowerCase().includes(modelFilter.trim().toLowerCase())) return false;
@@ -1101,6 +1115,7 @@ function Devices({ onSendMessage }) {
             <option value="all">All statuses</option>
             <option value="locked">Locked</option>
             <option value="active">Active</option>
+            <option value="released">Released</option>
             <option value="noSim">No SIM</option>
           </select>
           <input style={{ ...S.input, width: 200 }} value={imeiFilter} onChange={(e) => setImeiFilter(e.target.value)} placeholder="IMEI" />
@@ -1127,15 +1142,7 @@ function Devices({ onSendMessage }) {
             {filteredDevices.map((d) => {
               const lastCmd = d.device_commands?.sort((a, b) => new Date(b.issued_at) - new Date(a.issued_at))[0];
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
-              // A device is "Released" once the phone has acknowledged a RELEASE command
-              // (it then un-manages itself and the app auto-uninstalls, so it stops
-              // checking in). If the same IMEI is later re-provisioned, last_seen moves
-              // past the release, so it's no longer shown as released.
-              const relAck = (d.device_commands || [])
-                .filter((c) => c.command === "RELEASE" && c.acknowledged_at)
-                .sort((a, b) => new Date(b.acknowledged_at) - new Date(a.acknowledged_at))[0];
-              const cameBackAfterRelease = relAck && d.last_seen_at && new Date(d.last_seen_at) > new Date(relAck.acknowledged_at);
-              const released = !!relAck && !cameBackAfterRelease;
+              const released = isDeviceReleased(d);
               const releasePending = !released && (d.device_commands || []).some((c) => c.command === "RELEASE" && !c.acknowledged_at);
               const actionBtn = { ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 };
               return (
