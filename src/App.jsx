@@ -1127,6 +1127,16 @@ function Devices({ onSendMessage }) {
             {filteredDevices.map((d) => {
               const lastCmd = d.device_commands?.sort((a, b) => new Date(b.issued_at) - new Date(a.issued_at))[0];
               const pendingAck = lastCmd && !lastCmd.acknowledged_at;
+              // A device is "Released" once the phone has acknowledged a RELEASE command
+              // (it then un-manages itself and the app auto-uninstalls, so it stops
+              // checking in). If the same IMEI is later re-provisioned, last_seen moves
+              // past the release, so it's no longer shown as released.
+              const relAck = (d.device_commands || [])
+                .filter((c) => c.command === "RELEASE" && c.acknowledged_at)
+                .sort((a, b) => new Date(b.acknowledged_at) - new Date(a.acknowledged_at))[0];
+              const cameBackAfterRelease = relAck && d.last_seen_at && new Date(d.last_seen_at) > new Date(relAck.acknowledged_at);
+              const released = !!relAck && !cameBackAfterRelease;
+              const releasePending = !released && (d.device_commands || []).some((c) => c.command === "RELEASE" && !c.acknowledged_at);
               const actionBtn = { ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5 };
               return (
                 <React.Fragment key={d.id}>
@@ -1135,13 +1145,20 @@ function Devices({ onSendMessage }) {
                     <td style={S.td}>{d.device_tag || "—"}</td>
                     <td style={S.td} className="mono">{d.imei || "—"}</td>
                     <td style={S.td}>
-                      <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
-                        {d.is_locked ? "Locked" : "Active"}
-                      </span>
-                      {d.sim_missing && (
-                        <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>No SIM</span>
+                      {released ? (
+                        <span style={{ ...S.badge, background: "#EEF0F3", color: "#6B7280" }}>Released</span>
+                      ) : (
+                        <>
+                          <span style={{ ...S.badge, background: d.is_locked ? "#FCEBEC" : "#E5F8F2", color: d.is_locked ? "#D6414C" : "#0E9488" }}>
+                            {d.is_locked ? "Locked" : "Active"}
+                          </span>
+                          {d.sim_missing && (
+                            <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>No SIM</span>
+                          )}
+                          {releasePending && <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C", marginLeft: 6 }}>Release sent</span>}
+                          {pendingAck && !releasePending && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
+                        </>
                       )}
-                      {pendingAck && <span style={{ fontSize: 11, color: "#F2A93C", marginLeft: 8 }}>pending ack</span>}
                     </td>
                     <td style={S.td} className="mono">
                       {d.app_version_code
