@@ -165,6 +165,16 @@ export default function App() {
                   }}
                 />
               )}
+              {tab === "enrollmentData" && (
+                <EnrollmentData
+                  onSendMessage={(deviceId, msgTab, deviceImei) => {
+                    setSendMessageDeviceId(deviceId);
+                    setSendMessageTab(msgTab || "popups");
+                    setSendMessageImei(deviceImei || "");
+                    setTab("sendMessage");
+                  }}
+                />
+              )}
               {tab === "deviceSettings" && <DeviceSettingsPage initialTab={deviceSettingsTab} />}
               {tab === "installation" && <InstallationPage />}
               {tab === "feedbacks" && <FeedbacksPage />}
@@ -321,7 +331,10 @@ function Sidebar({ tab, setTab }) {
     { id: "tickets", label: "Support", icon: Ticket },
     {
       group: "Device Management", tourKey: "nav-device-management", icon: Smartphone, items: [
-        { id: "devices", label: "Devices", icon: Smartphone },
+        // Old Devices page hidden from the sidebar (code + route kept intact) — the
+        // PayTrigger-style "Enrollment Data" page replaces it. Un-comment to show again.
+        // { id: "devices", label: "Devices", icon: Smartphone },
+        { id: "enrollmentData", label: "Enrollment Data", icon: LayoutGrid },
         { id: "deviceSettings", label: "Device Settings", icon: Settings },
         { id: "installation", label: "Installation", icon: QrCode },
         { id: "feedbacks", label: "Feedbacks", icon: MessageSquare },
@@ -584,9 +597,9 @@ function Dashboard({ setTab, setDeviceSettingsTab }) {
             <QuickOpTile icon={Pencil} label="Enroll Device" onClick={() => goToDeviceSettings("enroll")} />
             <QuickOpTile icon={RefreshCw} label="Update Device Expiration" onClick={() => goToDeviceSettings("expire")} />
             <QuickOpTile icon={Unlock} label="Removal" onClick={() => goToDeviceSettings("restriction")} />
-            <QuickOpTile icon={KeyRound} label="PIN Unlock" onClick={() => setTab("devices")} />
+            <QuickOpTile icon={KeyRound} label="PIN Unlock" onClick={() => setTab("enrollmentData")} />
             <QuickOpTile icon={Trash2} label="Unenroll Device" onClick={() => goToDeviceSettings("unenroll")} />
-            <QuickOpTile icon={Smartphone} label="Device Enrollment Data" onClick={() => setTab("devices")} />
+            <QuickOpTile icon={Smartphone} label="Device Enrollment Data" onClick={() => setTab("enrollmentData")} />
           </div>
         </div>
       </div>
@@ -4499,6 +4512,536 @@ function TourOverlay({ steps, onNavigate, onClose }) {
 }
 
 /* ---------------- SHARED UI ---------------- */
+
+/* ---------------- DEVICE ENROLLMENT DATA (PayTrigger-style view) ---------------- */
+
+// Map our internal device state onto PayTrigger's "Server Device status" vocabulary
+// so this page reads the same as the Transsion portal staff are used to.
+function enrollServerStatus(d) {
+  if (isDeviceReleased(d)) return "removable";
+  if (d.last_seen_at) return "active";
+  if (d.imei) return "ready_to_activate";
+  return "enrolled";
+}
+
+const ENROLL_STATUS_STYLE = {
+  active: { background: "#E5F8F2", color: "#0E9488" },
+  enrolled: { background: "#EAF1FE", color: "#2F6FED" },
+  ready_to_activate: { background: "#FBF0DC", color: "#AD6A0C" },
+  removable: { background: "#EEF0F3", color: "#6B7280" },
+};
+
+function enrollFmt(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
+  if (isNaN(d)) return "—";
+  return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function enrollFmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso.length <= 10 ? iso + "T00:00:00" : iso);
+  if (isNaN(d)) return "—";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+function enrollDaysRemaining(expires_at) {
+  if (!expires_at) return null;
+  const end = new Date(expires_at.length <= 10 ? expires_at + "T23:59:59" : expires_at).getTime();
+  return Math.ceil((end - Date.now()) / 86400000);
+}
+
+function EnrollmentData({ onSendMessage }) {
+  const { deviceLicenseLimit, licensesConsumed, branchId } = useContext(BranchContext);
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [imeiFilter, setImeiFilter] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+  const [serverLock, setServerLock] = useState("all");
+  const [apkLock, setApkLock] = useState("all");
+  const [actFrom, setActFrom] = useState("");
+  const [actTo, setActTo] = useState("");
+  const [enrollFrom, setEnrollFrom] = useState("");
+  const [enrollTo, setEnrollTo] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [moreInfo, setMoreInfo] = useState(null);
+  const [imeiLogs, setImeiLogs] = useState(null);
+  const [opLog, setOpLog] = useState(null); // { device, events, loading }
+
+  // --- Operations popup (all per-device actions in one window) ---
+  const [opsId, setOpsId] = useState(null);     // id of the device whose Operations window is open
+  const [codeDialog, setCodeDialog] = useState(null);
+  const [confirmRelease, setConfirmRelease] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [editError, setEditError] = useState("");
+  const [appsDraft, setAppsDraft] = useState(null);
+  const [audioCall, setAudioCall] = useState(null);
+  const pcRef = useRef(null);
+  const channelRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const remoteAudioRef = useRef(null);
+
+  useEffect(() => { refresh().finally(() => setLoading(false)); }, []);
+  useEffect(() => {
+    const id = setInterval(() => { if (document.visibilityState === "visible") refresh(); }, 12000);
+    return () => clearInterval(id);
+  }, []);
+  useEffect(() => () => {
+    if (pcRef.current) pcRef.current.close();
+    if (localStreamRef.current) localStreamRef.current.getTracks().forEach((t) => t.stop());
+    if (channelRef.current) supabase.removeChannel(channelRef.current);
+  }, []);
+
+  async function refresh() {
+    const { data } = await supabase
+      .from("devices")
+      .select("*, device_commands(command, issued_at, acknowledged_at)")
+      .order("provisioned_at", { ascending: false });
+    if (data) setDevices(data);
+  }
+
+  const filtered = useMemo(() => devices.filter((d) => {
+    if (statusFilter !== "all" && enrollServerStatus(d) !== statusFilter) return false;
+    if (serverLock === "locked" && !d.is_locked) return false;
+    if (serverLock === "unlock" && d.is_locked) return false;
+    if (apkLock === "locked" && !d.is_locked) return false;
+    if (apkLock === "unlock" && d.is_locked) return false;
+    if (imeiFilter.trim() && !(d.imei || "").toLowerCase().includes(imeiFilter.trim().toLowerCase())) return false;
+    if (tagFilter.trim() && !(d.device_tag || "").toLowerCase().includes(tagFilter.trim().toLowerCase())) return false;
+    if (enrollFrom && (d.provisioned_at || "").slice(0, 10) < enrollFrom) return false;
+    if (enrollTo && (d.provisioned_at || "").slice(0, 10) > enrollTo) return false;
+    if (actFrom && (d.last_seen_at || "").slice(0, 10) < actFrom) return false;
+    if (actTo && (d.last_seen_at || "").slice(0, 10) > actTo) return false;
+    return true;
+  }), [devices, statusFilter, serverLock, apkLock, imeiFilter, tagFilter, enrollFrom, enrollTo, actFrom, actTo]);
+
+  const stats = useMemo(() => {
+    const activated = devices.filter((d) => d.last_seen_at).length;
+    return {
+      total: deviceLicenseLimit,
+      activated,
+      pending: devices.length - activated,
+      remaining: Math.max(deviceLicenseLimit - licensesConsumed, 0),
+    };
+  }, [devices, deviceLicenseLimit, licensesConsumed]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const pageClamped = Math.min(page, totalPages);
+  const pageRows = filtered.slice((pageClamped - 1) * pageSize, pageClamped * pageSize);
+  useEffect(() => { setPage(1); }, [statusFilter, serverLock, apkLock, imeiFilter, tagFilter, enrollFrom, enrollTo, actFrom, actTo, pageSize]);
+
+  function resetFilters() {
+    setStatusFilter("all"); setImeiFilter(""); setTagFilter(""); setServerLock("all"); setApkLock("all");
+    setActFrom(""); setActTo(""); setEnrollFrom(""); setEnrollTo("");
+  }
+
+  function exportCsv() {
+    const header = ["Device Tag", "IMEI or SN", "Model", "Enroll Time", "APK Activation Time", "Expiration Time", "Day Remaining", "Server Device status", "Apk Lockstate", "Server Lockstate"];
+    const rows = filtered.map((d) => {
+      const dr = enrollDaysRemaining(d.expires_at);
+      return [
+        d.device_tag || "", d.imei || "", d.device_model || "",
+        d.provisioned_at || "", d.last_seen_at || "", d.expires_at || "",
+        dr == null ? "" : dr, enrollServerStatus(d),
+        d.is_locked ? "Locked" : "Unlock", d.is_locked ? "Locked" : "Unlock",
+      ];
+    });
+    const csv = [header, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = "device-enrollment-data.csv"; a.click(); URL.revokeObjectURL(url);
+  }
+
+  async function openOpLog(device) {
+    setOpLog({ device, events: [], loading: true });
+    const { data } = await supabase.from("device_events").select("*").eq("device_id", device.id).order("occurred_at", { ascending: false });
+    setOpLog({ device, events: data || [], loading: false });
+  }
+
+  /* ---- Per-device operations (ported so this window is the one place staff act) ---- */
+  async function sendCommand(device, command) {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
+    await supabase.from("devices").update({ is_locked: command === "LOCK" }).eq("id", device.id);
+    await supabase.from("device_events").insert({ device_id: device.id, event_type: command === "LOCK" ? "LOCK" : "UNLOCK", method: "ADMIN" });
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+    refresh();
+  }
+  function forceUpdate(device) {
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+    setCodeDialog({ code: "Update requested", note: "The phone will fetch the latest version on its next check-in — right away if it's online, otherwise when it next polls, is locked/unlocked, or the app is opened." });
+  }
+  async function sendRawCommand(device, command) {
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({ device_id: device.id, command, issued_by: user?.email || "admin" });
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+  }
+  function undoHandover(device) {
+    sendRawCommand(device, "UNDO_HANDOVER");
+    setCodeDialog({ code: "Undo handover sent", note: "On its next check-in the phone will show its app icon again and lift the factory-reset / safe-boot lockdown. It stays managed (still device owner)." });
+  }
+  function doRelease(device) {
+    sendRawCommand(device, "RELEASE");
+    setConfirmRelease(null);
+    setOpsId(null);
+    setCodeDialog({ code: "Release sent", note: "On its next check-in the phone will remove all management (FRP, restrictions, device owner) and can then be uninstalled — the phone is fully freed. Use this only for a paid-off / returned device." });
+  }
+  function showCode(device) {
+    if (!device.unlock_pin) { setCodeDialog({ code: "—", note: "No code set for this device yet." }); return; }
+    setCodeDialog({ code: device.unlock_pin, note: null });
+  }
+  async function resetUnlockCode(device) {
+    const newPin = String(Math.floor(100000 + Math.random() * 900000));
+    await supabase.from("devices").update({ unlock_pin: newPin, unlock_pin_generated_at: new Date().toISOString() }).eq("id", device.id);
+    setCodeDialog({ code: newPin, note: "Old code is no longer valid. Give this new one to the customer." });
+    refresh();
+  }
+  async function openApps(device) {
+    setAppsDraft({ device, apps: [], loading: true, filter: "" });
+    const { data } = await supabase.from("device_apps").select("*").eq("device_id", device.id).order("app_name", { ascending: true });
+    setAppsDraft({ device, apps: data || [], loading: false, filter: "" });
+  }
+  async function toggleAppWhitelist(app, checked) {
+    setAppsDraft((prev) => (prev ? { ...prev, apps: prev.apps.map((a) => (a.id === app.id ? { ...a, is_whitelisted: checked } : a)) } : prev));
+    await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
+    if (app.device_id) supabase.functions.invoke("notify-devices", { body: { device_ids: [app.device_id] } }).catch(() => {});
+  }
+  function openEdit(d) { setEditDraft({ id: d.id, device_model: d.device_model || "", imei: d.imei || "", device_tag: d.device_tag || "" }); setEditError(""); }
+  async function saveEdit() {
+    if (!editDraft.device_model.trim()) { setEditError("Enter a device model."); return; }
+    await supabase.from("devices").update({ device_model: editDraft.device_model.trim(), imei: editDraft.imei.trim() || null, device_tag: editDraft.device_tag.trim() || null }).eq("id", editDraft.id);
+    setEditDraft(null);
+    refresh();
+  }
+  async function performDelete(device) {
+    await supabase.from("devices").delete().eq("id", device.id);
+    await supabase.from("device_removal_log").insert({ device_model: device.device_model || null, imei: device.imei || null, branch_id: branchId });
+    setConfirmDelete(null);
+    setOpsId(null);
+    refresh();
+  }
+  async function endAudioCall(sendBye = false) {
+    if (sendBye && channelRef.current) { try { await channelRef.current.send({ type: "broadcast", event: "bye", payload: {} }); } catch (e) {} }
+    if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+    if (localStreamRef.current) { localStreamRef.current.getTracks().forEach((t) => t.stop()); localStreamRef.current = null; }
+    if (channelRef.current) { supabase.removeChannel(channelRef.current); channelRef.current = null; }
+    setAudioCall(null);
+  }
+  async function startAudioCall(device) {
+    setAudioCall({ device, status: "connecting" });
+    let localStream;
+    try { localStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch (e) { setAudioCall({ device, status: "failed", errorMsg: "Microphone access denied or unavailable." }); return; }
+    localStreamRef.current = localStream;
+    const pc = new RTCPeerConnection({ iceServers: [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
+    ] });
+    pcRef.current = pc;
+    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+    pc.ontrack = (event) => { if (remoteAudioRef.current) remoteAudioRef.current.srcObject = event.streams[0]; };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") setAudioCall((prev) => (prev ? { ...prev, status: "connected" } : prev));
+      else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") setAudioCall((prev) => (prev ? { ...prev, status: "failed", errorMsg: "Call disconnected." } : prev));
+    };
+    const sessionId = crypto.randomUUID();
+    const channel = supabase.channel(`call:${sessionId}`, { config: { broadcast: { self: false } } });
+    channelRef.current = channel;
+    pc.onicecandidate = (event) => {
+      if (event.candidate) channel.send({ type: "broadcast", event: "ice-admin", payload: { sdpMid: event.candidate.sdpMid, sdpMLineIndex: event.candidate.sdpMLineIndex, candidate: event.candidate.candidate } });
+    };
+    channel
+      .on("broadcast", { event: "ready" }, async () => {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        channel.send({ type: "broadcast", event: "offer", payload: { sdp: offer.sdp } });
+        setAudioCall((prev) => (prev ? { ...prev, status: "ringing" } : prev));
+      })
+      .on("broadcast", { event: "answer" }, async ({ payload }) => { await pc.setRemoteDescription({ type: "answer", sdp: payload.sdp }); })
+      .on("broadcast", { event: "ice-phone" }, async ({ payload }) => { try { await pc.addIceCandidate({ sdpMid: payload.sdpMid, sdpMLineIndex: payload.sdpMLineIndex, candidate: payload.candidate }); } catch (e) {} })
+      .on("broadcast", { event: "bye" }, () => { endAudioCall(false); })
+      .subscribe();
+    const { data: { user } } = await supabase.auth.getUser();
+    await supabase.from("device_commands").insert({ device_id: device.id, command: "AUDIO_CALL", call_session_id: sessionId, issued_by: user?.email || "admin" });
+    supabase.functions.invoke("notify-devices", { body: { device_ids: [device.id] } }).catch(() => {});
+  }
+
+  const opsDevice = opsId ? devices.find((d) => d.id === opsId) : null;
+
+  const COLS = ["Device Tag", "IMEI or SN", "Model", "Enroll Time", "APK Activation Time", "Expiration Time", "Day Remaining / D", "Server Device status", "Apk Lockstate", "Server Lockstate", "More info", "IMEI change logs", "Operation Log", "Operations"];
+  const linkBtn = { background: "transparent", border: "none", color: "#0E9488", fontSize: 12.5, fontWeight: 600, padding: 0, textDecoration: "underline", whiteSpace: "nowrap" };
+  const lockChip = (locked) => <span style={{ ...S.badge, background: locked ? "#FCEBEC" : "#E5F8F2", color: locked ? "#D6414C" : "#0E9488" }}>{locked ? "Locked" : "Unlock"}</span>;
+
+  return (
+    <div>
+      <PageHeader eyebrow="Fleet" title="Device Enrollment Data" count={filtered.length} />
+
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", margin: "-8px 0 20px", fontSize: 13, color: "#374151" }}>
+        <span>Total Licenses: <strong>{stats.total}</strong></span>
+        <span>Activated Licenses: <strong>{stats.activated}</strong></span>
+        <span>Pending Licenses: <strong>{stats.pending}</strong></span>
+        <span>Remaining Licenses: <strong>{stats.remaining}</strong></span>
+      </div>
+
+      <div style={{ ...S.tableCard, padding: 18, marginBottom: 16 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <select style={{ ...S.select, minWidth: 180 }} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+            <option value="all">Server DeviceStatus</option>
+            <option value="enrolled">enrolled</option>
+            <option value="ready_to_activate">ready_to_activate</option>
+            <option value="active">active</option>
+            <option value="removable">removable</option>
+          </select>
+          <input style={{ ...S.input, width: 180 }} value={imeiFilter} onChange={(e) => setImeiFilter(e.target.value)} placeholder="IMEI" />
+          <input style={{ ...S.input, width: 180 }} value={tagFilter} onChange={(e) => setTagFilter(e.target.value)} placeholder="Device Tag" />
+          <select style={{ ...S.select, minWidth: 150 }} value={serverLock} onChange={(e) => setServerLock(e.target.value)}>
+            <option value="all">Server Lockstate</option>
+            <option value="locked">Locked</option>
+            <option value="unlock">Unlock</option>
+          </select>
+          <select style={{ ...S.select, minWidth: 150 }} value={apkLock} onChange={(e) => setApkLock(e.target.value)}>
+            <option value="all">Apk Lockstate</option>
+            <option value="locked">Locked</option>
+            <option value="unlock">Unlock</option>
+          </select>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 12.5, color: "#6B7280" }}>Activation</span>
+          <input style={{ ...S.input, width: 150 }} type="date" value={actFrom} onChange={(e) => setActFrom(e.target.value)} />
+          <span style={{ fontSize: 12.5, color: "#6B7280" }}>to</span>
+          <input style={{ ...S.input, width: 150 }} type="date" value={actTo} onChange={(e) => setActTo(e.target.value)} />
+          <span style={{ fontSize: 12.5, color: "#6B7280", marginLeft: 8 }}>Enroll</span>
+          <input style={{ ...S.input, width: 150 }} type="date" value={enrollFrom} onChange={(e) => setEnrollFrom(e.target.value)} />
+          <span style={{ fontSize: 12.5, color: "#6B7280" }}>to</span>
+          <input style={{ ...S.input, width: 150 }} type="date" value={enrollTo} onChange={(e) => setEnrollTo(e.target.value)} />
+          <button style={{ ...S.primaryBtn, marginLeft: "auto" }} onClick={refresh}>Search</button>
+          <button style={S.secondaryBtn} onClick={resetFilters}>Reset</button>
+          <button style={S.secondaryBtn} onClick={exportCsv}>Export</button>
+        </div>
+      </div>
+
+      <div style={{ ...S.tableCard, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1360 }}>
+          <thead><tr>{COLS.map((h) => <th key={h} style={{ ...S.th, whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+          <tbody>
+            {loading && <tr><td colSpan={COLS.length} style={S.emptyCell}>Loading…</td></tr>}
+            {!loading && filtered.length === 0 && <tr><td colSpan={COLS.length} style={S.emptyCell}>No data</td></tr>}
+            {pageRows.map((d) => {
+              const st = enrollServerStatus(d);
+              const stStyle = ENROLL_STATUS_STYLE[st];
+              const dr = enrollDaysRemaining(d.expires_at);
+              return (
+                <tr key={d.id} style={{ borderBottom: "1px solid #F0F1F4" }}>
+                  <td style={S.td}>{d.device_tag || "—"}</td>
+                  <td style={{ ...S.td, whiteSpace: "nowrap" }} className="mono">{d.imei || "—"}</td>
+                  <td style={S.td}>{d.device_model || "—"}</td>
+                  <td style={{ ...S.td, whiteSpace: "nowrap" }}>{enrollFmt(d.provisioned_at)}</td>
+                  <td style={{ ...S.td, whiteSpace: "nowrap" }}>{enrollFmt(d.last_seen_at)}</td>
+                  <td style={{ ...S.td, whiteSpace: "nowrap" }}>{enrollFmtDate(d.expires_at)}</td>
+                  <td style={S.td}>{dr == null ? "—" : <span style={{ color: dr < 0 ? "#D6414C" : dr <= 7 ? "#AD6A0C" : "#0E9488", fontWeight: 600 }}>{dr < 0 ? "Expired" : `${dr} d`}</span>}</td>
+                  <td style={S.td}><span style={{ ...S.badge, ...stStyle }}>{st}</span></td>
+                  <td style={S.td}>{lockChip(d.is_locked)}</td>
+                  <td style={S.td}>{lockChip(d.is_locked)}</td>
+                  <td style={S.td}><button style={linkBtn} onClick={() => setMoreInfo(d)}>More info</button></td>
+                  <td style={S.td}><button style={linkBtn} onClick={() => setImeiLogs(d)}>View</button></td>
+                  <td style={S.td}><button style={linkBtn} onClick={() => openOpLog(d)}>View</button></td>
+                  <td style={S.td}><button style={{ ...S.secondaryBtn, padding: "6px 12px", fontSize: 12.5, whiteSpace: "nowrap" }} onClick={() => setOpsId(d.id)}>Operations</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 14, fontSize: 13, color: "#6B7280", flexWrap: "wrap" }}>
+        <span>Total {filtered.length}</span>
+        <select style={{ ...S.select, padding: "6px 10px" }} value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+          <option value={10}>10/page</option>
+          <option value={50}>50/page</option>
+          <option value={100}>100/page</option>
+        </select>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button style={{ ...S.secondaryBtn, padding: "6px 12px" }} disabled={pageClamped <= 1} onClick={() => setPage(pageClamped - 1)}>‹</button>
+          <span>Page {pageClamped} / {totalPages}</span>
+          <button style={{ ...S.secondaryBtn, padding: "6px 12px" }} disabled={pageClamped >= totalPages} onClick={() => setPage(pageClamped + 1)}>›</button>
+        </div>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>Go to
+          <input style={{ ...S.input, width: 60, padding: "6px 8px" }} type="number" min={1} max={totalPages} value={pageClamped} onChange={(e) => setPage(Math.max(1, Math.min(totalPages, Number(e.target.value) || 1)))} />
+        </span>
+      </div>
+
+      {opsDevice && (() => {
+        const d = opsDevice;
+        const ob = (danger) => ({ ...(danger ? S.dangerBtn : S.secondaryBtn), width: "100%", justifyContent: "center", padding: "8px 10px", fontSize: 12.5, textAlign: "center" });
+        const rows = [
+          d.is_locked
+            ? { label: "Unlock", desc: "Remotely unlock the phone — lifts immediately via FCM push.", onClick: () => sendCommand(d, "UNLOCK") }
+            : { label: "Lock", danger: true, desc: "Remotely lock the phone (e.g. when an installment is overdue).", onClick: () => sendCommand(d, "LOCK") },
+          { label: "Force Update", desc: "Tell the phone to download the latest app version on its next check-in.", onClick: () => forceUpdate(d) },
+          { label: "Undo Handover", desc: "Reverse handover — the phone shows its app icon again and the safe-boot / factory-reset lockdown is lifted. Stays managed.", onClick: () => undoHandover(d) },
+          { label: "Release", danger: true, desc: "Fully free the device — FRP, restrictions and device owner are all removed. Only for a paid-off / returned device.", onClick: () => setConfirmRelease(d) },
+          { label: "Notifications", desc: "Send a push notification or full-screen popup message to the phone.", onClick: () => { setOpsId(null); onSendMessage?.(d.id); } },
+          { label: "Push Call", desc: "Open the caller-ID call screen on the phone (to speak with the customer).", onClick: () => { setOpsId(null); onSendMessage?.(d.id, "call", d.imei); } },
+          { label: "Audio Call", desc: "Live two-way audio call with the phone (uses the admin's microphone).", onClick: () => startAudioCall(d) },
+          { label: "Unlock Code", desc: "View this device's current unlock PIN.", onClick: () => showCode(d) },
+          { label: "Reset Code", desc: "Generate a new unlock PIN — the old one becomes invalid immediately.", onClick: () => resetUnlockCode(d) },
+          { label: "Activity", desc: "View this device's lock/unlock history.", onClick: () => openOpLog(d) },
+          { label: "Allowed Apps", desc: "Manage the apps allowed on the lock screen (whitelist on/off).", onClick: () => openApps(d) },
+          { label: "Edit", desc: "Edit the device's model, IMEI or tag.", onClick: () => openEdit(d) },
+          { label: "Delete", danger: true, desc: "Permanently delete the device record (does not unmanage the phone — use Release for that).", onClick: () => setConfirmDelete(d) },
+        ];
+        return (
+          <Drawer title={`Operations · ${d.device_tag || d.device_model || d.imei || "device"}`} onClose={() => setOpsId(null)}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+              <span style={{ ...S.badge, ...ENROLL_STATUS_STYLE[enrollServerStatus(d)] }}>{enrollServerStatus(d)}</span>
+              {lockChip(d.is_locked)}
+              {d.sim_missing && <span style={{ ...S.badge, background: "#FBF0DC", color: "#AD6A0C" }}>No SIM</span>}
+            </div>
+            {rows.map((r) => (
+              <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 0", borderBottom: "1px solid #F0F1F4" }}>
+                <div style={{ width: 132, flexShrink: 0 }}>
+                  <button style={ob(r.danger)} onClick={r.onClick}>{r.label}</button>
+                </div>
+                <p style={{ fontSize: 12.5, color: "#6B7280", margin: 0, lineHeight: 1.5 }}>{r.desc}</p>
+              </div>
+            ))}
+          </Drawer>
+        );
+      })()}
+
+      {moreInfo && (
+        <Drawer title="More info" onClose={() => setMoreInfo(null)}>
+          <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", rowGap: 10, columnGap: 12, fontSize: 13.5 }}>
+            {[
+              ["Device Tag", moreInfo.device_tag || "—"],
+              ["IMEI or SN", moreInfo.imei || "—"],
+              ["Model", moreInfo.device_model || "—"],
+              ["Server status", enrollServerStatus(moreInfo)],
+              ["Lock state", moreInfo.is_locked ? "Locked" : "Unlock"],
+              ["SIM", moreInfo.sim_missing ? "Missing" : "Present"],
+              ["App version", moreInfo.app_version_name ? `${moreInfo.app_version_name} (${moreInfo.app_version_code})` : (moreInfo.app_version_code || "—")],
+              ["Unlock PIN", moreInfo.unlock_pin || "—"],
+              ["Enroll Time", enrollFmt(moreInfo.provisioned_at)],
+              ["APK Activation", enrollFmt(moreInfo.last_seen_at)],
+              ["Expiration", enrollFmtDate(moreInfo.expires_at)],
+            ].map(([k, v]) => (
+              <React.Fragment key={k}>
+                <div style={{ color: "#9AA1AE" }}>{k}</div>
+                <div style={{ color: "#14161C", fontWeight: 500 }}>{v}</div>
+              </React.Fragment>
+            ))}
+          </div>
+        </Drawer>
+      )}
+
+      {imeiLogs && (
+        <Drawer title="IMEI change logs" onClose={() => setImeiLogs(null)}>
+          <p style={{ fontSize: 13.5, color: "#6B7280", marginTop: 0 }}>Device: <strong>{imeiLogs.device_tag || imeiLogs.device_model || imeiLogs.imei}</strong></p>
+          <p style={{ fontSize: 13, color: "#9AA1AE" }}>No IMEI change records for this device.</p>
+        </Drawer>
+      )}
+
+      {opLog && (
+        <Drawer title="Operation Log" onClose={() => setOpLog(null)}>
+          <p style={{ fontSize: 13.5, color: "#6B7280", marginTop: 0 }}>Device: <strong>{opLog.device.device_tag || opLog.device.device_model || opLog.device.imei}</strong></p>
+          {opLog.loading && <p style={{ fontSize: 13, color: "#9AA1AE" }}>Loading…</p>}
+          {!opLog.loading && opLog.events.length === 0 && <p style={{ fontSize: 13, color: "#9AA1AE" }}>No operations logged yet.</p>}
+          {!opLog.loading && opLog.events.map((ev) => (
+            <div key={ev.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 0", borderBottom: "1px solid #F0F1F4", fontSize: 13 }}>
+              <span style={{ color: "#14161C" }}>
+                {ev.event_type === "LOCK" ? "Locked" : ev.event_type === "UNLOCK" ? "Unlocked" : (ev.event_type || "event")}
+                {ev.method ? ` · ${ev.method === "PIN_CODE" ? "code" : "admin"}` : ""}
+              </span>
+              <span style={{ color: "#9AA1AE", whiteSpace: "nowrap" }}>{enrollFmt(ev.occurred_at)}</span>
+            </div>
+          ))}
+        </Drawer>
+      )}
+
+      {codeDialog && <CodeDialog code={codeDialog.code} note={codeDialog.note} onClose={() => setCodeDialog(null)} />}
+
+      {confirmRelease && (
+        <ConfirmDialog
+          title="Release this device?"
+          message="On its next check-in the phone removes ALL management (FRP, restrictions, device owner) and can then be uninstalled. Use only for a paid-off / returned device — this can't be undone remotely."
+          onConfirm={() => doRelease(confirmRelease)}
+          onCancel={() => setConfirmRelease(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this device record?"
+          message="This removes the device from your dashboard. It does NOT unmanage the phone — for that use Release first. The consumed license is not refunded."
+          onConfirm={() => performDelete(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {editDraft && (
+        <Drawer title="Edit device" onClose={() => setEditDraft(null)}>
+          <Field label="Device model" error={editError}><input style={S.input} value={editDraft.device_model} onChange={(e) => setEditDraft({ ...editDraft, device_model: e.target.value })} /></Field>
+          <Field label="IMEI"><input style={S.input} value={editDraft.imei} onChange={(e) => setEditDraft({ ...editDraft, imei: e.target.value })} /></Field>
+          <Field label="Device tag"><input style={S.input} value={editDraft.device_tag} onChange={(e) => setEditDraft({ ...editDraft, device_tag: e.target.value })} /></Field>
+          <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+            <button style={S.primaryBtn} onClick={saveEdit}>Save</button>
+            <button style={S.secondaryBtn} onClick={() => setEditDraft(null)}>Cancel</button>
+          </div>
+        </Drawer>
+      )}
+
+      {appsDraft && (
+        <Drawer title={`Allowed apps · ${(appsDraft.device.device_model || appsDraft.device.imei)}`} onClose={() => setAppsDraft(null)}>
+          {appsDraft.loading && <p style={{ color: "#9AA1AE", fontSize: 13 }}>Loading…</p>}
+          {!appsDraft.loading && appsDraft.apps.length === 0 && (
+            <p style={{ color: "#9AA1AE", fontSize: 13 }}>No apps reported yet — this phone hasn't checked in.</p>
+          )}
+          {!appsDraft.loading && appsDraft.apps.length > 0 && (
+            <>
+              {appsDraft.apps.length > 15 && (
+                <input style={{ ...S.input, marginBottom: 14 }} placeholder="Search apps…" value={appsDraft.filter} onChange={(e) => setAppsDraft({ ...appsDraft, filter: e.target.value })} />
+              )}
+              <div style={{ maxHeight: 520, overflowY: "auto" }}>
+                {appsDraft.apps
+                  .filter((app) => app.app_name.toLowerCase().includes(appsDraft.filter.toLowerCase()))
+                  .map((app) => (
+                    <label key={app.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderBottom: "1px solid #EEF0F3", cursor: "pointer" }}>
+                      <input type="checkbox" checked={app.is_whitelisted} onChange={(e) => toggleAppWhitelist(app, e.target.checked)} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 13.5, color: "#14161C", margin: 0 }}>{app.app_name}</p>
+                        <p className="mono" style={{ fontSize: 11, color: "#9AA1AE", margin: "2px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{app.package_name}</p>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+            </>
+          )}
+        </Drawer>
+      )}
+
+      {audioCall && (
+        <div style={S.overlay}>
+          <div style={S.confirmCard}>
+            <h3 className="serif" style={{ fontSize: 18, color: "#14161C", margin: "0 0 4px" }}>
+              Audio call · {(audioCall.device.device_model || audioCall.device.imei)}
+            </h3>
+            <p style={{ fontSize: 13.5, color: "#6B7280", margin: "0 0 20px" }}>
+              {audioCall.status === "connecting" && "Ringing the phone…"}
+              {audioCall.status === "ringing" && "Waiting for the phone to pick up…"}
+              {audioCall.status === "connected" && "Connected — live call in progress."}
+              {audioCall.status === "failed" && (audioCall.errorMsg || "Call failed.")}
+            </p>
+            <button style={S.dangerBtn} onClick={() => endAudioCall(true)}>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><PhoneOff size={14} /> End call</span>
+            </button>
+          </div>
+          <audio ref={remoteAudioRef} autoPlay />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function PageHeader({ eyebrow, title, count, children }) {
   return (
