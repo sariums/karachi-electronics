@@ -921,6 +921,12 @@ function Devices({ onSendMessage }) {
   async function toggleAppWhitelist(app, checked) {
     setAppsDraft((prev) => (prev ? { ...prev, apps: prev.apps.map((a) => (a.id === app.id ? { ...a, is_whitelisted: checked } : a)) } : prev));
     await supabase.from("device_apps").update({ is_whitelisted: checked }).eq("id", app.id);
+    // Wake the phone (FCM) so it re-reads its whitelist immediately — otherwise the
+    // change only shows on the lock screen after the next ~15-min poll. Same push we
+    // send on lock/unlock. device_id lives on the app row (device_apps.device_id).
+    if (app.device_id) {
+      supabase.functions.invoke("notify-devices", { body: { device_ids: [app.device_id] } }).catch(() => {});
+    }
   }
 
   async function endAudioCall(sendBye = false) {

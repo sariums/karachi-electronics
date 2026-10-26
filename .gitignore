@@ -8,3 +8,8 @@ EXTERNAL_API_CREDENTIALS.txt
 
 # Supabase CLI local artifacts
 supabase/.temp/
+
+# Internal docs — keep local, never deploy
+KE-Lock-Documentation.html
+KE-Lock-Walkthrough.html
+LendLock-Website.html
