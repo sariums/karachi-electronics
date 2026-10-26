@@ -4209,13 +4209,22 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
     if (!newEmail || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newEmail)) { setEmailMsg("Enter a valid email."); return; }
     setSavingEmail(true);
     setEmailMsg("");
-    // Changing a login email needs the auth admin API (service role), so it goes
-    // through an edge function; it updates both the Auth user and admin_users.
-    const { data, error } = await supabase.functions.invoke("update-admin-email", {
-      body: { user_id: editEmail.userId, new_email: newEmail },
-    });
+    let data, error;
+    if (editEmail.userId) {
+      // Existing admin — change their login email (needs the auth admin API, so it
+      // goes through an edge function that updates both Auth and admin_users).
+      ({ data, error } = await supabase.functions.invoke("update-admin-email", {
+        body: { user_id: editEmail.userId, new_email: newEmail },
+      }));
+    } else {
+      // Branch has no admin yet — invite one as the branch Owner with this email.
+      const name = (editEmail.name || "").trim() || newEmail.split("@")[0];
+      ({ data, error } = await supabase.functions.invoke("invite-admin-user", {
+        body: { name, email: newEmail, role: "Owner", invited_by: email, branch_id: editEmail.branchId },
+      }));
+    }
     setSavingEmail(false);
-    if (error || !data?.success) { setEmailMsg(data?.reason || error?.message || "Could not update the email."); return; }
+    if (error || !data?.success) { setEmailMsg(data?.reason || error?.message || "Could not save the email."); return; }
     setEditEmail(null);
     load();
   }
@@ -4301,27 +4310,43 @@ function SuperAdminPortal({ email, canSwitchToBranch, onSwitchToBranch }) {
                           <td style={S.td}>
                             {editEmail?.branchId === b.id ? (
                               <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                                {!editEmail.userId && (
+                                  <input
+                                    style={{ ...S.input, width: 120, padding: "6px 10px" }}
+                                    value={editEmail.name || ""}
+                                    onChange={(e) => setEditEmail({ ...editEmail, name: e.target.value })}
+                                    placeholder="Admin name"
+                                  />
+                                )}
                                 <input
-                                  style={{ ...S.input, width: 200, padding: "6px 10px" }}
+                                  style={{ ...S.input, width: 190, padding: "6px 10px" }}
                                   type="email"
                                   value={editEmail.value}
                                   onChange={(e) => setEditEmail({ ...editEmail, value: e.target.value })}
                                   placeholder="owner@branch.com"
                                   autoFocus
                                 />
-                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveEmail} disabled={savingEmail}>{savingEmail ? "Saving…" : "Save"}</button>
+                                <button style={{ ...S.primaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={saveEmail} disabled={savingEmail}>{savingEmail ? "Saving…" : (editEmail.userId ? "Save" : "Invite")}</button>
                                 <button style={{ ...S.secondaryBtn, padding: "6px 10px", fontSize: 12 }} onClick={() => { setEditEmail(null); setEmailMsg(""); }}>Cancel</button>
                                 {emailMsg && <span style={{ fontSize: 11, color: "#D6414C", width: "100%" }}>{emailMsg}</span>}
                               </div>
                             ) : (() => {
                               const emails = branchAdmins[b.id] || [];
                               const owner = branchOwners[b.id];
-                              if (!emails.length) {
-                                return owner ? null : <span style={{ color: "#9AA1AE" }}>—</span>;
+                              if (!emails.length && !owner) {
+                                // No admin yet (e.g. a branch created before its admin invite
+                                // succeeded) — let the super admin invite one here.
+                                return (
+                                  <button style={{ ...S.secondaryBtn, padding: "4px 9px", fontSize: 11.5, display: "inline-flex", alignItems: "center", gap: 4 }}
+                                    title="Invite a branch admin"
+                                    onClick={() => { setEmailMsg(""); setEditEmail({ branchId: b.id, userId: null, value: "", name: "" }); }}>
+                                    <Plus size={12} /> Set admin
+                                  </button>
+                                );
                               }
                               return (
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                  <span className="mono">{emails[0]}</span>
+                                  <span className="mono">{emails[0] || "—"}</span>
                                   {emails.length > 1 && (
                                     <span style={{ fontSize: 11, color: "#9AA1AE" }} title={emails.join(", ")}>+{emails.length - 1}</span>
                                   )}
