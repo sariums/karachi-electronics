@@ -4773,6 +4773,16 @@ function EnrollmentData({ onSendMessage }) {
   const linkBtn = { background: "transparent", border: "none", color: "#0E9488", fontSize: 12.5, fontWeight: 600, padding: 0, textDecoration: "underline", whiteSpace: "nowrap" };
   const lockChip = (locked) => <span style={{ ...S.badge, background: locked ? "#FCEBEC" : "#E5F8F2", color: locked ? "#D6414C" : "#0E9488" }}>{locked ? "Locked" : "Unlock"}</span>;
 
+  // IMEI (col 1) and Model (col 2) stay frozen on the left while the rest of the
+  // row scrolls sideways, so you can always tell which device each status / operation
+  // belongs to. Widths are fixed so Model's `left` offset lines up exactly with the
+  // IMEI column edge (no gap or overlap at the frozen boundary).
+  const FZ_IMEI_W = 180, FZ_MODEL_W = 170;
+  const thImei  = { ...S.th, whiteSpace: "nowrap", position: "sticky", left: 0, background: "#FFFFFF", zIndex: 3, width: FZ_IMEI_W, minWidth: FZ_IMEI_W, maxWidth: FZ_IMEI_W };
+  const thModel = { ...S.th, whiteSpace: "nowrap", position: "sticky", left: FZ_IMEI_W, background: "#FFFFFF", zIndex: 3, width: FZ_MODEL_W, minWidth: FZ_MODEL_W, maxWidth: FZ_MODEL_W, boxShadow: "inset -1px 0 0 #E6E8EC" };
+  const tdImei  = { ...S.td, whiteSpace: "nowrap", position: "sticky", left: 0, background: "#FFFFFF", zIndex: 1, width: FZ_IMEI_W, minWidth: FZ_IMEI_W, maxWidth: FZ_IMEI_W };
+  const tdModel = { ...S.td, whiteSpace: "nowrap", position: "sticky", left: FZ_IMEI_W, background: "#FFFFFF", zIndex: 1, width: FZ_MODEL_W, minWidth: FZ_MODEL_W, maxWidth: FZ_MODEL_W, overflow: "hidden", textOverflow: "ellipsis", boxShadow: "inset -1px 0 0 #F0F1F4" };
+
   return (
     <div>
       <PageHeader eyebrow="Fleet" title="Device Enrollment Data" count={filtered.length} />
@@ -4823,7 +4833,7 @@ function EnrollmentData({ onSendMessage }) {
 
       <div style={{ ...S.tableCard, overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1360 }}>
-          <thead><tr>{COLS.map((h) => <th key={h} style={{ ...S.th, whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
+          <thead><tr>{COLS.map((h, i) => <th key={h} style={i === 1 ? thImei : i === 2 ? thModel : { ...S.th, whiteSpace: "nowrap" }}>{h}</th>)}</tr></thead>
           <tbody>
             {loading && <tr><td colSpan={COLS.length} style={S.emptyCell}>Loading…</td></tr>}
             {!loading && filtered.length === 0 && <tr><td colSpan={COLS.length} style={S.emptyCell}>No data</td></tr>}
@@ -4834,8 +4844,8 @@ function EnrollmentData({ onSendMessage }) {
               return (
                 <tr key={d.id} style={{ borderBottom: "1px solid #F0F1F4" }}>
                   <td style={S.td}>{d.device_tag || "—"}</td>
-                  <td style={{ ...S.td, whiteSpace: "nowrap" }} className="mono">{d.imei || "—"}</td>
-                  <td style={S.td}>{d.device_model || "—"}</td>
+                  <td style={tdImei} className="mono">{d.imei || "—"}</td>
+                  <td style={tdModel}>{d.device_model || "—"}</td>
                   <td style={{ ...S.td, whiteSpace: "nowrap" }}>{enrollFmt(d.provisioned_at)}</td>
                   <td style={{ ...S.td, whiteSpace: "nowrap" }}>{enrollFmt(d.last_seen_at)}</td>
                   <td style={{ ...S.td, whiteSpace: "nowrap" }}>{enrollFmtDate(d.expires_at)}</td>
